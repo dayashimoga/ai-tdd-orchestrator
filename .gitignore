@@ -1,0 +1,76 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment & Testing
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+.test_venv/
+.pytest_cache/
+.coverage
+htmlcov/
+pytest_cov*.txt
+pytest_out*.txt
+out.txt
+*.log
+
+# C/C++ (Go binaries, local builds)
+*.o
+*.obj
+*.dll
+*.exe
+*.so
+*.dylib
+
+# Node.js
+node_modules/
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE/Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.classpath
+.project
+.settings/
+
+# Application Specific Generation Target
+your_project/
+generated_code.txt
+prompt_override.txt
+output.log

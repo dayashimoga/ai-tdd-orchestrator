@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  ai-reviewer:
+    build: .
+    volumes:
+      - .:/app
+    # Use host network so we don't have to map ports, or map 11434
+    ports:
+      - "11434:11434"
+    environment:
+      - LOCAL_MODE=true
+    command: ["bash", "-c", "/usr/local/bin/run-local.sh && python3 scripts/ai_pipeline.py"]
