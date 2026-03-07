@@ -80,7 +80,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
           OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
-        run: python scripts/ai_pipeline.py
+        run: python scripts/ai_pipeline.py --manual
 
       - name: Run User Project Tests (If Python)
         run: |
