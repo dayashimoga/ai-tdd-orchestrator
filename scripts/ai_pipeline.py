@@ -9,6 +9,8 @@ import sys
 import json
 import re
 import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Optional, Dict, Any
 
 import requests
@@ -18,6 +20,8 @@ from github import Github
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import scripts.repo_map as repo_map
 import scripts.gpu_platform as gpu_platform
+import scripts.llm_router as llm_router
+import scripts.rag_engine as rag_engine
 
 # ---------------------------------------------------------------------------
 # Configuration (all env-configurable)
@@ -28,6 +32,7 @@ _detected_platform, _detected_url = gpu_platform.select_platform()
 OLLAMA_URL: str = os.getenv("OLLAMA_URL") or _detected_url
 MODEL_NAME: str = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
 NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX") or "8192")
+MAX_TDD_ITERATIONS: int = int(os.getenv("MAX_TDD_ITERATIONS") or "5")
 
 GITHUB_TOKEN: Optional[str] = os.getenv("GITHUB_TOKEN")
 TARGET_REPO_TOKEN: Optional[str] = os.getenv("TARGET_REPO_TOKEN") or GITHUB_TOKEN
@@ -37,8 +42,13 @@ COMMIT_SHA: Optional[str] = os.getenv("COMMIT_SHA")
 IS_LOCAL: bool = os.getenv("LOCAL_MODE", "false").lower() == "true"
 PROJECT_TYPE: str = os.getenv("PROJECT_TYPE", "new")
 TARGET_REPO: str = os.getenv("TARGET_REPO", "")
+DRY_RUN: bool = "--dry-run" in sys.argv
 
 GIT_TIMEOUT: int = 120  # seconds — prevents infinite CI hangs
+
+# Runtime caches (cleared between tasks, preserved across retries)
+_repo_map_cache: Optional[str] = None
+_discovery_cache: Dict[str, List[str]] = {}
 
 # ---------------------------------------------------------------------------
 # Shared Utilities
@@ -89,39 +99,32 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
 
     Returns the number of files written.
     """
-    current_file_path: Optional[str] = None
-    current_content: List[str] = []
     files_written = 0
-
-    for line in raw_output.split("\n"):
-        if line.startswith("--- FILE:") and line.endswith("---"):
-            if current_file_path:
-                validated = safe_path(current_file_path, target_dir)
-                if validated:
-                    write_path = os.path.join(target_dir, validated) if not validated.startswith(target_dir) else validated
-                    os.makedirs(os.path.dirname(write_path), exist_ok=True)
-                    with open(write_path, "w", encoding="utf-8") as f:
-                        f.write("\n".join(current_content).strip())
-                    files_written += 1
-
-            extracted = line.replace("--- FILE:", "").replace("---", "").strip()
-            current_file_path = extracted
-            current_content = []
+    # Split by standard delimiter
+    parts = re.split(r'^--- FILE:\s*(.+?)\s*---$', raw_output, flags=re.MULTILINE)
+    
+    for i in range(1, len(parts), 2):
+        if i + 1 >= len(parts):
+            break
+        
+        file_path = parts[i].strip()
+        raw_content = parts[i+1]
+        
+        # Strip trailing conversational fluff by strictly taking what's inside the FIRST markdown block if present
+        match = re.search(r'```(?:[a-zA-Z0-9_-]+)?\s*\n(.*?)\n?```', raw_content, re.DOTALL)
+        if match:
+            content = match.group(1).strip()
         else:
-            if current_file_path is not None:
-                if line.strip().startswith("```"):
-                    continue
-                current_content.append(line)
-
-    # Write final tracked file
-    if current_file_path:
-        validated = safe_path(current_file_path, target_dir)
-        if validated:
-            write_path = os.path.join(target_dir, validated) if not validated.startswith(target_dir) else validated
-            os.makedirs(os.path.dirname(write_path), exist_ok=True)
-            with open(write_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(current_content).strip())
-            files_written += 1
+            content = raw_content.strip()
+            
+        if content:
+            validated = safe_path(file_path, target_dir)
+            if validated:
+                write_path = os.path.join(target_dir, validated) if not validated.startswith(target_dir) else validated
+                os.makedirs(os.path.dirname(write_path), exist_ok=True)
+                with open(write_path, "w", encoding="utf-8") as f:
+                    f.write(content + "\n")
+                files_written += 1
 
     return files_written
 
@@ -130,31 +133,8 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
 # ---------------------------------------------------------------------------
 
 def ai_generate(prompt: str) -> str:
-    """Hits the Ollama API to generate code/text, streaming output to stdout."""
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": True,
-        "options": {"temperature": 0.2, "num_ctx": NUM_CTX},
-    }
-    try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=300, stream=True)
-        response.raise_for_status()
-
-        full_response = ""
-        for line in response.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                word = chunk.get("response", "")
-                full_response += word
-                sys.stdout.write(word)
-                sys.stdout.flush()
-
-        print()  # newline after streaming
-        return full_response
-    except Exception as e:
-        print(f"\nError calling Ollama API: {e}")
-        return ""
+    """Routes generation to the configured LLM provider via llm_router."""
+    return llm_router.generate(prompt, stream=True, temperature=0.2, num_ctx=NUM_CTX)
 
 
 def post_inline_comment(file_path: str, line_number: int, comment: str) -> None:
@@ -317,12 +297,12 @@ def ensure_code_exists() -> None:
         if os.path.exists("prompt.txt"):
             prompt = open("prompt.txt").read()
             advanced_prompt = (
-                f"Generate a complete implementation for the following prompt: {prompt}\n"
+                f"You are bootstrapping a new project. Project Requirements:\n{prompt}\n\n"
+                "Generate a complete, fully functional initial implementation. DO NOT generate dummy code or placeholders.\n"
                 "You must organize your output into distinct files. For each file you generate, strictly use the following delimiter format:\n"
-                "--- FILE: <file_path_relative_to_root> ---\n<code>\n\n"
-                "Example:\n--- FILE: src/index.html ---\n<!DOCTYPE html><html>...</html>\n"
-                "--- FILE: src/styles/main.css ---\nbody { color: red; }\n\n"
-                "Return ONLY the delimiter blocks and the exact file contents."
+                "--- FILE: <file_path_relative_to_root> ---\n```python\n<body>\n```\n\n"
+                "Example:\n--- FILE: src/main.py ---\n```python\nprint('Hello')\n```\n\n"
+                "Return ONLY the delimiter blocks and code."
             )
             print("\n==============================================")
             print("🚀 SOFTWARE FACTORY: BOOTSTRAPPING SCAFFOLD")
@@ -349,18 +329,24 @@ def ensure_code_exists() -> None:
 def generate_task_plan(prompt: str) -> None:
     """Agent 1 (The Planner): Generates a strict Markdown task checklist."""
     print("\n[Planner] Analyzing requirements and creating execution plan...")
+    req_path = "your_project/docs/requirements.md"
+    os.makedirs(os.path.dirname(req_path), exist_ok=True)
+    with open(req_path, "w", encoding="utf-8") as f:
+        f.write(f"# Project Requirements\n\n{prompt}\n")
+
     plan_prompt = (
-        f"Based on the following user prompt: {prompt}\n\n"
+        f"Based on the following project requirements: {prompt}\n\n"
         "Create a comprehensive implementation plan as a strict Markdown checklist.\n"
-        "Break the work down into granular steps. Ensure there is a step for writing Pytest unit tests.\n"
+        "Break the work down into detailed, actionable steps (e.g., '- [ ] Create models.py with User schema', not just '- [ ] Core Logic').\n"
+        "Ensure there is a step for writing comprehensive Pytest unit tests.\n"
         "Output ONLY the markdown checklist formatted exactly like this:\n"
-        "- [ ] Setup Project Structure\n"
-        "- [ ] Implement Core Logic\n"
-        "- [ ] Write Unit Tests\n"
+        "- [ ] Detailed step 1\n"
+        "- [ ] Detailed step 2\n"
+        "- [ ] Write comprehensive unit tests\n"
     )
     plan_output = ai_generate(plan_prompt)
 
-    with open("your_project/project_tasks.md", "w") as f:
+    with open("your_project/project_tasks.md", "w", encoding="utf-8") as f:
         f.write(plan_output)
     print(plan_output)
 
@@ -371,30 +357,86 @@ def generate_task_plan(prompt: str) -> None:
             f.write(plan_output + "\n\n")
 
 
-def execute_task(task_description: str) -> None:
-    """Agent 2 (The Engineer): Generates code with Repo Map context optimization."""
+def update_task_plan(new_prompt: str) -> None:
+    """Agent 1 (The Planner): Updates the execution plan for new requirements."""
+    print("\n[Planner] Updating requirements and execution plan...")
+    req_path = "your_project/docs/requirements.md"
+    os.makedirs(os.path.dirname(req_path), exist_ok=True)
+    
+    if os.path.exists(req_path):
+        with open(req_path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n## New Requirements (Update)\n{new_prompt}\n")
+    else:
+        with open(req_path, "w", encoding="utf-8") as f:
+            f.write(f"# Project Requirements\n\n{new_prompt}\n")
+
+    with open("your_project/project_tasks.md", "r", encoding="utf-8") as f:
+        existing_plan = f.read()
+
+    plan_prompt = (
+        f"We have an existing project task list:\n{existing_plan}\n\n"
+        f"The user has provided new requirements: {new_prompt}\n\n"
+        "Update the task list to incorporate these new requirements. "
+        "Keep completed tasks marked as '- [x]'. "
+        "Add new tasks as '- [ ]' with descriptive, actionable instructions. "
+        "Output ONLY the full updated markdown checklist."
+    )
+    plan_output = ai_generate(plan_prompt)
+    with open("your_project/project_tasks.md", "w", encoding="utf-8") as f:
+        f.write(plan_output)
+    print(plan_output)
+
+    step_summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+    if step_summary_file and os.path.exists(step_summary_file):
+        with open(step_summary_file, "a") as f:
+            f.write("## 📋 AI Task Planner Checklist (Updated)\n\n")
+            f.write(plan_output + "\n\n")
+
+
+def execute_task(task_description: str, use_cache: bool = False) -> None:
+    """Agent 2 (The Engineer): Generates code with Repo Map context optimization.
+
+    Args:
+        task_description: The task or bug-fix prompt.
+        use_cache: If True, reuse the cached repo map and discovery results
+                   from a previous call (saves an LLM round-trip on retries).
+    """
+    global _repo_map_cache, _discovery_cache
     print(f"\n[Engineer] Executing Task: {task_description}")
 
-    repo_map_content = repo_map.generate_repo_map("your_project")
+    # O2: Cache repo map across retries
+    if use_cache and _repo_map_cache:
+        repo_map_content = _repo_map_cache
+        print("♻️  Reusing cached repo map (retry iteration)")
+    else:
+        repo_map_content = repo_map.generate_repo_map("your_project")
+        _repo_map_cache = repo_map_content
 
-    discovery_prompt = (
-        f"You are the Engineer Agent. Your current task is: {task_description}\n\n"
-        f"Here is the structural map of the current codebase:\n{repo_map_content}\n\n"
-        "To accomplish this task, which files do you need to read in their entirety? "
-        "Return ONLY a comma-separated list of exact file paths. If you don't need any, return NONE."
-    )
-    print("🔍 Inspecting Repo Map to determine context window...")
+    # O3: Cache discovery results on retry
+    cache_key = task_description[:80]
+    if use_cache and cache_key in _discovery_cache:
+        requested_files = _discovery_cache[cache_key]
+        print(f"♻️  Reusing cached file discovery ({len(requested_files)} files)")
+    else:
+        discovery_prompt = (
+            f"You are the Engineer Agent. Your current task is: {task_description}\n\n"
+            f"Here is the structural map of the current codebase:\n{repo_map_content}\n\n"
+            "To accomplish this task, which files do you need to read in their entirety? "
+            "Return ONLY a comma-separated list of exact file paths. If you don't need any, return NONE."
+        )
+        print("🔍 Inspecting Repo Map to determine context window...")
 
-    payload = {"model": MODEL_NAME, "prompt": discovery_prompt, "stream": False, "options": {"temperature": 0.1, "num_ctx": 4096}}
-    try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=120)
-        response.raise_for_status()
-        requested_files_str = response.json().get("response", "NONE")
-    except Exception as e:
-        print(f"Failed to query for files: {e}")
-        requested_files_str = "NONE"
+        payload = {"model": MODEL_NAME, "prompt": discovery_prompt, "stream": False, "options": {"temperature": 0.1, "num_ctx": 4096}}
+        try:
+            response = requests.post(OLLAMA_URL, json=payload, timeout=120)
+            response.raise_for_status()
+            requested_files_str = response.json().get("response", "NONE")
+        except Exception as e:
+            print(f"Failed to query for files: {e}")
+            requested_files_str = "NONE"
 
-    requested_files = [f.strip() for f in requested_files_str.split(",") if f.strip() and f.strip() != "NONE"]
+        requested_files = [f.strip() for f in requested_files_str.split(",") if f.strip() and f.strip() != "NONE"]
+        _discovery_cache[cache_key] = requested_files
 
     context = f"--- REPO AST MAP ---\n{repo_map_content}\n\n--- FULL TARGET FILES ---\n"
     loaded_files = 0
@@ -411,42 +453,124 @@ def execute_task(task_description: str) -> None:
     if loaded_files == 0:
         context += "(No full files loaded. Relying on map and generation capabilities.)\n"
 
+    req_context = ""
+    req_path = "your_project/docs/requirements.md"
+    if os.path.exists(req_path):
+        with open(req_path, "r", encoding="utf-8") as f:
+           req_context = f.read()
+
+    # RAG: Retrieve relevant reference document context
+    rag_context = rag_engine.get_rag_context(task_description)
+    if rag_context:
+        print(f"📚 RAG: Injected reference document context into prompt")
+
     engineer_prompt = (
-        f"You are the Engineer Agent. Your current task is: {task_description}\n\n"
+        f"You are the Engineer Agent. You are working on this project:\n\n"
+        f"--- PROJECT REQUIREMENTS ---\n{req_context}\n\n"
+        f"{rag_context}"
+        f"Your current granular task is: {task_description}\n\n"
         f"Here is your optimized project context:\n{context}\n\n"
-        "Generate the necessary code to fulfill the task. If the task involves testing, ensure you use `pytest`.\n"
+        "Generate fully functional, production-ready code to fulfill the task. DO NOT generate dummy or placeholder code.\n"
+        "If the task involves testing, ensure you use `pytest`.\n"
         "You must organize your output into distinct files using exactly this format:\n"
-        "--- FILE: <file_path_relative_to_root> ---\n<code>\n\n"
-        "Return ONLY the delimiter blocks and exact file contents. Do not include markdown fences around the code."
+        "--- FILE: <file_path_relative_to_root> ---\n```python\n<code>\n```\n\n"
+        "Return ONLY the delimiter blocks and exact file contents."
     )
+
+    if DRY_RUN:
+        print("\n🏜️  DRY RUN — skipping code generation. Would send this prompt:")
+        print(engineer_prompt[:500] + "...")
+        return
 
     raw_output = ai_generate(engineer_prompt)
     parse_and_write_files(raw_output, "your_project")
+    # Invalidate repo map cache after files change
+    _repo_map_cache = None
+
+
+def detect_test_command() -> List[str]:
+    """E10: Auto-detect the appropriate test framework based on project files."""
+    project_dir = "your_project"
+    # Check for Python (pytest)
+    if any(f.endswith(".py") for _, _, files in os.walk(project_dir) for f in files):
+        return [sys.executable, "-m", "pytest", f"{project_dir}/", f"--cov={project_dir}/", "--cov-fail-under=90", "--cov-report=term-missing"]
+    # Check for JavaScript/TypeScript (jest or npm test)
+    if os.path.exists(os.path.join(project_dir, "package.json")):
+        pkg_path = os.path.join(project_dir, "package.json")
+        with open(pkg_path, "r") as f:
+            pkg = json.loads(f.read())
+        if "jest" in pkg.get("devDependencies", {}) or "jest" in pkg.get("dependencies", {}):
+            return ["npx", "--prefix", project_dir, "jest", "--coverage"]
+        return ["npm", "--prefix", project_dir, "test"]
+    # Check for Go
+    if any(f.endswith(".go") for _, _, files in os.walk(project_dir) for f in files):
+        return ["go", "test", "-cover", f"./{project_dir}/..."]
+    # Check for Rust
+    if os.path.exists(os.path.join(project_dir, "Cargo.toml")):
+        return ["cargo", "test", "--manifest-path", os.path.join(project_dir, "Cargo.toml")]
+    # Default to pytest
+    return [sys.executable, "-m", "pytest", f"{project_dir}/", f"--cov={project_dir}/", "--cov-fail-under=90", "--cov-report=term-missing"]
 
 
 def run_pytest_validation() -> Tuple[bool, str]:
-    """Execute pytest natively to enforce TDD behavior."""
-    print("\n[TDD Loop] Running Pytest Suite with Coverage requirements...")
+    """Execute the detected test framework natively to enforce TDD behavior (E10)."""
+    test_cmd = detect_test_command()
+    framework_name = "pytest" if "pytest" in str(test_cmd) else test_cmd[0]
+    print(f"\n[TDD Loop] Running {framework_name} Suite...")
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", "your_project/", "--cov=your_project/", "--cov-fail-under=90", "--cov-report=term-missing"],
+            test_cmd,
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
-            print("✅ Tests Passed & Coverage Achieved!")
+            print(f"✅ {framework_name} Tests Passed!")
             print(result.stdout)
             return True, result.stdout
         else:
-            print("❌ Test failures or missing coverage detected:")
+            print(f"❌ {framework_name} test failures detected:")
             feedback = truncate_feedback(result.stdout + "\n" + result.stderr)
             print(feedback)
             return False, feedback
     except subprocess.TimeoutExpired as e:
-        print("❌ Pytest timed out after 120 seconds")
-        return False, f"Pytest timed out: {e}"
+        print(f"❌ {framework_name} timed out after 120 seconds")
+        return False, f"{framework_name} timed out: {e}"
     except Exception as e:
-        print(f"Failed to execute Pytest: {e}")
+        print(f"Failed to execute {framework_name}: {e}")
         return False, str(e)
+
+
+def send_webhook_notification(message: str) -> None:
+    """E7: Sends a notification to Slack/Discord if WEBHOOK_URL is configured."""
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if not webhook_url:
+        return
+    try:
+        # Discord and Slack both accept {"content": "..."} / {"text": "..."}
+        payload = {"content": message, "text": message}
+        requests.post(webhook_url, json=payload, timeout=10)
+        print("📨 Webhook notification sent.")
+    except Exception as e:
+        print(f"⚠️ Webhook notification failed: {e}")
+
+
+def estimate_gpu_cost(elapsed_seconds: float) -> str:
+    """E8: Estimates GPU cost based on platform pricing and elapsed time."""
+    _platform, _ = gpu_platform.select_platform(use_failover=False)
+    info = gpu_platform.get_platform_info(_platform)
+    cost_str = info.get("cost")
+    if not cost_str or info.get("free"):
+        return "Free"
+    # Parse cost like "$0.30/hr"
+    try:
+        import re as _re
+        match = _re.search(r'\$([\d.]+)', cost_str)
+        if match:
+            hourly = float(match.group(1))
+            estimated = (elapsed_seconds / 3600) * hourly
+            return f"~${estimated:.4f} ({cost_str})"
+    except Exception:
+        pass
+    return cost_str
 
 
 def save_rollback_point() -> Optional[str]:
@@ -474,11 +598,16 @@ def rollback_if_worse(rollback_hash: Optional[str], pre_test_result: bool) -> No
         print(f"⚠️ Rollback failed: {e}")
 
 
-def run_tdd_loop(max_iterations: int = 5) -> None:
+def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
     """Orchestrates the continuous planning, execution, and testing loop."""
     print("\n==============================================")
-    print("🔄 TDD ORCHESTRATOR: ENGAGED")
+    print(f"🔄 TDD ORCHESTRATOR: ENGAGED (Max Iterations: {max_iterations})")
     print("==============================================")
+
+    current_feedback = ""
+    completed_tasks: List[str] = []
+    failed_tasks: List[str] = []
+    loop_start = time.time()
 
     for iteration in range(max_iterations):
         if not os.path.exists("your_project/project_tasks.md"):
@@ -491,10 +620,22 @@ def run_tdd_loop(max_iterations: int = 5) -> None:
         for i, task in enumerate(tasks):
             if "- [ ]" in task:
                 all_done = False
-                task_description = task.replace("- [ ]", "").strip()
+                base_task_description = task.replace("- [ ]", "").strip()
+                iter_start = time.time()
+
+                print(f"\n==============================================")
+                print(f"🔄 ITERATION {iteration + 1}/{max_iterations}")
+                is_retry = bool(current_feedback)
+                if is_retry:
+                    print(f"🎯 PURPOSE: Fixing failing tests for '{base_task_description}'")
+                    task_prompt = f"FIX PREVIOUS BUG For Task: '{base_task_description}'. The tests threw this trace: {current_feedback}"
+                else:
+                    print(f"🎯 PURPOSE: Implementing new task: '{base_task_description}'")
+                    task_prompt = base_task_description
+                print("==============================================\n")
 
                 rollback_hash = save_rollback_point()
-                execute_task(task_description)
+                execute_task(task_prompt, use_cache=is_retry)
 
                 success, feedback = run_pytest_validation()
                 if success:
@@ -505,14 +646,20 @@ def run_tdd_loop(max_iterations: int = 5) -> None:
                         for vr in vqa_results:
                             if not vr.get("passed", True):
                                 print(f"\n👁 Visual QA failed for {vr['file']}: {vr['feedback'][:200]}")
-                                execute_task(f"Fix CSS/styling issues in {vr['file']}. Visual QA feedback: {vr['feedback']}")
+                                current_feedback = f"Visual QA failed for {vr['file']}. Feedback: {vr['feedback']}"
+                                success = False
+                                break
                     except Exception as e:
                         print(f"⚠️ Visual QA skipped: {e}")
 
+                elapsed = time.time() - iter_start
+                if success:
                     tasks[i] = task.replace("- [ ]", "- [x]")
                     with open("your_project/project_tasks.md", "w") as f:
                         f.writelines(tasks)
-                    print(f"✅ Marked Task as Complete: {task_description}")
+                    print(f"✅ Marked Task as Complete: {base_task_description}")
+                    print(f"⏱ Iteration {iteration + 1} completed in {elapsed:.1f}s")
+                    completed_tasks.append(base_task_description)
 
                     status_text = "".join(tasks)
                     print("\n📈 CURRENT PROJECT STATUS:")
@@ -521,12 +668,15 @@ def run_tdd_loop(max_iterations: int = 5) -> None:
                     step_summary_file = os.getenv("GITHUB_STEP_SUMMARY")
                     if step_summary_file and os.path.exists(step_summary_file):
                         with open(step_summary_file, "a") as f:
-                            f.write(f"### Iteration Update: Completed `{task_description}`\n\n")
+                            f.write(f"### Iteration {iteration + 1} Update: Completed `{base_task_description}` ({elapsed:.1f}s)\n\n")
                             f.write(status_text + "\n\n")
+                            
+                    current_feedback = ""
                 else:
                     rollback_if_worse(rollback_hash, False)
-                    print("⚠️ Task Failed Validation. Feeding stack trace back to Engineer...")
-                    execute_task(f"FIX PREVIOUS BUG For Task: '{task_description}'. The tests threw this trace: {feedback}")
+                    print(f"⚠️ Task Failed Validation. Iteration {iteration + 1} took {elapsed:.1f}s — will retry.")
+                    failed_tasks.append(base_task_description)
+                    current_feedback = feedback if not current_feedback else current_feedback
 
                 break  # One task per loop iteration
 
@@ -536,8 +686,57 @@ def run_tdd_loop(max_iterations: int = 5) -> None:
             print("==============================================")
             break
     else:
-        print("\n⚠️ TDD loop exhausted max iterations without resolving all tasks.")
+        print(f"\n⚠️ TDD loop exhausted max {max_iterations} iterations without resolving all tasks.")
         post_help_comment()
+
+    total_elapsed = time.time() - loop_start
+    print(f"\n⏱ Total TDD loop time: {total_elapsed:.1f}s")
+    generate_run_summary(completed_tasks, failed_tasks, total_elapsed)
+
+
+def generate_run_summary(completed: List[str], failed: List[str], total_elapsed: float) -> None:
+    """Generates a docs/run_summary.md report after each pipeline run (E3)."""
+    summary_path = "your_project/docs/run_summary.md"
+    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+
+    # Try to read coverage and test stats from last pytest run
+    coverage_pct = "N/A"
+    test_pass_rate = "N/A"
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "your_project/", "--cov=your_project/", "--cov-report=term-missing", "-q"],
+            capture_output=True, text=True, timeout=60,
+        )
+        for line in result.stdout.split("\n"):
+            if "TOTAL" in line and "%" in line:
+                coverage_pct = line.split()[-1]
+            if "passed" in line:
+                test_pass_rate = line.strip()
+    except Exception:
+        pass
+
+    from datetime import datetime
+    run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    content = (
+        f"# Pipeline Run Summary\n\n"
+        f"**Run Time:** {run_time}\n"
+        f"**Total Elapsed:** {total_elapsed:.1f}s\n"
+        f"**Coverage:** {coverage_pct}\n"
+        f"**Test Results:** {test_pass_rate}\n\n"
+        f"## Completed Tasks ({len(completed)})\n"
+    )
+    for t in completed:
+        content += f"- ✅ {t}\n"
+    content += f"\n## Failed / Retried Tasks ({len(failed)})\n"
+    for t in failed:
+        content += f"- ❌ {t}\n"
+    if not failed:
+        content += "- None\n"
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"📝 Run summary saved to {summary_path}")
 
 
 def post_help_comment() -> None:
@@ -640,8 +839,15 @@ def resolve_issue() -> None:
         print(f"⚠️ Failed to checkout branch {branch_name}: {e}")
 
     task_prompt = f"Fix GitHub Issue #{issue_num}: {issue_title}\n\nDescription:\n{issue_body}"
-    print("\n[Issue Resolver] Generating Task Plan from Issue...")
-    generate_task_plan(task_prompt)
+    
+    if not os.path.exists("your_project/project_tasks.md"):
+        print("\n[Issue Resolver] Generating Task Plan from Issue...")
+        ensure_code_exists()
+        generate_task_plan(task_prompt)
+    else:
+        print("\n[Issue Resolver] Updating Task Plan with new Issue requirements...")
+        update_task_plan(task_prompt)
+        
     run_tdd_loop()
 
     print(f"\n[Issue Resolver] Pushing changes and creating Pull Request...")
@@ -683,24 +889,47 @@ def resolve_issue() -> None:
 
 def main() -> None:
     if os.path.exists("prompt.txt"):
-        prompt_text = open("prompt.txt").read().strip()
+        with open("prompt.txt", "r") as f:
+            prompt_text = f.read().strip()
         print("\n==============================================")
         print("📄 INITIAL PROMPT (SYSTEM REQUEST):")
         print("==============================================")
         print(prompt_text)
         print("==============================================\n")
 
+    if "--dry-run" in sys.argv:
+        print("🏜️  DRY RUN MODE — no code will be generated or pushed.")
+
     if len(sys.argv) > 1 and sys.argv[1] == "--manual":
         setup_target_repository()
-        ensure_code_exists()
-        prompt_text = open("prompt.txt").read().strip() if os.path.exists("prompt.txt") else "Build a python app."
-        generate_task_plan(prompt_text)
+        
+        prompt_text = "Build a python app."
+        if os.path.exists("prompt.txt"):
+            with open("prompt.txt", "r") as f:
+                prompt_text = f.read().strip()
+
+        if not os.path.exists("your_project/project_tasks.md"):
+            ensure_code_exists()
+            generate_task_plan(prompt_text)
+        else:
+            print("\n🔄 Existing project detected. Updating tasks based on the new prompt...")
+            update_task_plan(prompt_text)
+            
         run_tdd_loop()
-        push_to_target_repository()
+        if not DRY_RUN:
+            push_to_target_repository()
     elif len(sys.argv) > 1 and sys.argv[1] == "--issue":
         resolve_issue()
     elif len(sys.argv) > 1 and sys.argv[1] == "--resume-with-hint":
         resume_with_hint()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--index-docs":
+        print("\n📚 Manually indexing reference documents...")
+        count = rag_engine.get_rag_context("test query")
+        engine = rag_engine._engine
+        if engine:
+            print(f"✅ {len(engine.chunks)} chunks indexed from {engine.docs_dir}")
+        else:
+            print("⚠️ No reference documents found. Place files in your_project/docs/reference/")
     else:
         print("Standard static review pipeline disabled in favor of TDD Orchestrator.")
 

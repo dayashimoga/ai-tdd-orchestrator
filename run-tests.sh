@@ -25,8 +25,6 @@ npm install -g eslint htmlhint stylelint stylelint-config-standard >/dev/null 2>
 echo "🧪 Running Tests and enforcing 90% coverage..."
 pytest tests/ --cov=scripts/ --cov-report=term-missing --cov-fail-under=90
 
-echo "✅ Tests passed! Tearing down ephemeral virtual environment to prevent pollution..."
+echo "✅ Tests passed! Virtual environment preserved for CI cache reuse."
 deactivate
-rm -rf "$VENV_DIR"
-
-echo "🎉 Clean Exit. Host machine is entirely unpolluted."
+echo "🎉 Clean Exit."

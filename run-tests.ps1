@@ -36,14 +36,13 @@ if ($PytestExitCode -eq 0) {
 } else {
     Write-Host "Tests failed with exit code $PytestExitCode!" -ForegroundColor Red
 }
-Write-Host "Tearing down ephemeral virtual environment to prevent pollution..." -ForegroundColor Green
+Write-Host "Virtual environment preserved for CI cache reuse." -ForegroundColor Green
 if (Get-Command deactivate -ErrorAction SilentlyContinue) {
     deactivate
 }
-Remove-Item -Recurse -Force $VENV_DIR
 
 if ($PytestExitCode -ne 0) {
     exit $PytestExitCode
 }
 
-Write-Host "Clean Exit. Host machine is entirely unpolluted." -ForegroundColor Green
+Write-Host "Clean Exit." -ForegroundColor Green

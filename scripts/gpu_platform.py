@@ -150,37 +150,50 @@ def detect_platform() -> Tuple[str, str]:
 def detect_with_failover() -> Tuple[str, str]:
     """Detects the best platform AND verifies it is alive.
 
-    If the primary platform is down, tries the next one in FAILOVER_ORDER.
+    Uses parallel health checks via ThreadPoolExecutor for speed (O5).
     Falls back to local Ollama as last resort.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     # 1. Explicit override (no failover — user knows what they want)
     explicit_url = os.getenv("OLLAMA_URL", "")
     if explicit_url and "localhost" not in explicit_url and "127.0.0.1" not in explicit_url:
         return "custom", explicit_url
 
-    # 2. Try each configured platform with a health check
-    tried: List[str] = []
+    # 2. Collect all configured platforms
+    candidates: List[Tuple[str, str]] = []
     for platform_key in FAILOVER_ORDER:
         env_var = PLATFORMS[platform_key].get("env_var")
         if not env_var:
             continue
         url = os.getenv(env_var)
-        if not url:
-            continue
+        if url:
+            candidates.append((platform_key, _resolve_url(url)))
 
-        resolved = _resolve_url(url)
-        tried.append(platform_key)
-        print(f"[GPU] Trying {PLATFORMS[platform_key]['name']}...")
+    if not candidates:
+        return "local", "http://localhost:11434/api/generate"
 
+    # 3. Parallel health check all candidates at once
+    print(f"[GPU] Checking {len(candidates)} platforms in parallel...")
+
+    def _check(item: Tuple[str, str]) -> Optional[Tuple[str, str]]:
+        key, resolved = item
         if health_check(resolved):
-            print(f"[GPU] Connected: {PLATFORMS[platform_key]['name']} ({PLATFORMS[platform_key]['gpu']})")
-            return platform_key, resolved
-        else:
-            print(f"[GPU] {PLATFORMS[platform_key]['name']} is DOWN. Trying next...")
+            return key, resolved
+        return None
 
-    # 3. Fallback to local
-    if tried:
-        print(f"[GPU] All remote platforms down ({', '.join(tried)}). Falling back to local Ollama.")
+    with ThreadPoolExecutor(max_workers=min(len(candidates), 5)) as pool:
+        futures = {pool.submit(_check, c): c for c in candidates}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                key, resolved = result
+                print(f"[GPU] Connected: {PLATFORMS[key]['name']} ({PLATFORMS[key]['gpu']})")
+                return key, resolved
+
+    # 4. Fallback to local
+    tried = [c[0] for c in candidates]
+    print(f"[GPU] All remote platforms down ({', '.join(tried)}). Falling back to local Ollama.")
     return "local", "http://localhost:11434/api/generate"
 
 

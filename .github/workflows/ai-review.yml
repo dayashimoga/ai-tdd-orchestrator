@@ -45,12 +45,20 @@ jobs:
         run: echo "${{ github.event.inputs.prompt_override }}" > prompt.txt
 
       - name: Cache Testing Virtual Environment
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .test_venv
           key: ${{ runner.os }}-test-venv-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-test-venv-
+
+      - name: Cache npm global packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-global-linters
+          restore-keys: |
+            ${{ runner.os }}-npm-global-
 
       - name: Install dependencies
         run: |
@@ -106,7 +114,7 @@ jobs:
 
       - name: Cache Ollama Models
         if: env.LOCAL_OLLAMA_REQUIRED == 'true'
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.ollama/models
           key: ${{ runner.os }}-ollama-models

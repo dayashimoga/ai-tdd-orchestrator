@@ -1,6 +1,7 @@
 # Operating System Files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Python
 __pycache__/
@@ -37,6 +38,7 @@ venv.bak/
 .pytest_cache/
 .coverage
 htmlcov/
+cov.txt
 pytest_cov*.txt
 pytest_out*.txt
 out.txt
@@ -47,13 +49,11 @@ out.txt
 *.obj
 *.dll
 *.exe
-*.so
 *.dylib
 
 # Node.js
 node_modules/
-logs
-*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -53,6 +53,19 @@ class TestUtilities(unittest.TestCase):
                     count = ai_pipeline.parse_and_write_files(raw, "your_project")
                     self.assertEqual(count, 2)
 
+    def test_parse_and_write_files_with_markdown(self):
+        raw = "--- FILE: test.py ---\n```python\nprint('hello')\n```\n--- FILE: test2.py ---\n```\nprint('world')\n```"
+        with patch('scripts.ai_pipeline.safe_path', return_value="your_project/test.py"):
+            with patch('os.makedirs'):
+                mock_file = mock_open()
+                with patch('builtins.open', mock_file):
+                    count = ai_pipeline.parse_and_write_files(raw, "your_project")
+                    self.assertEqual(count, 2)
+                    # Verify that the markdown ticks were stripped
+                    handle = mock_file()
+                    handle.write.assert_any_call("print('hello')\n")
+                    handle.write.assert_any_call("print('world')\n")
+
     def test_parse_and_write_files_empty(self):
         count = ai_pipeline.parse_and_write_files("Just some text", "your_project")
         self.assertEqual(count, 0)
@@ -171,10 +184,29 @@ class TestTDDLoop(unittest.TestCase):
     """Tests for generate_task_plan, execute_task, run_pytest_validation, and run_tdd_loop."""
 
     @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task 1\n- [ ] Task 2")
+    @patch('os.makedirs')
     @patch('builtins.open', new_callable=mock_open)
     @patch('builtins.print')
-    def test_generate_task_plan(self, mock_print, mock_file, mock_gen):
+    def test_generate_task_plan(self, mock_print, mock_file, mock_makedirs, mock_gen):
         ai_pipeline.generate_task_plan("Build a calculator")
+        mock_gen.assert_called_once()
+        
+    @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task 1\n- [ ] New Task")
+    @patch('os.makedirs')
+    @patch('os.path.exists', side_effect=[True, True])
+    @patch('builtins.open', new_callable=mock_open, read_data="- [ ] Task 1\n")
+    @patch('builtins.print')
+    def test_update_task_plan_existing(self, mock_print, mock_file, mock_exists, mock_makedirs, mock_gen):
+        ai_pipeline.update_task_plan("Add a new feature")
+        mock_gen.assert_called_once()
+        
+    @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task 1\n- [ ] New Task")
+    @patch('os.makedirs')
+    @patch('os.path.exists', side_effect=[False, True])
+    @patch('builtins.open', new_callable=mock_open, read_data="- [ ] Task 1\n")
+    @patch('builtins.print')
+    def test_update_task_plan_new_req(self, mock_print, mock_file, mock_exists, mock_makedirs, mock_gen):
+        ai_pipeline.update_task_plan("Add a new feature")
         mock_gen.assert_called_once()
 
     @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: main.py ---\nprint('hi')")
@@ -327,19 +359,34 @@ class TestMainCLI(unittest.TestCase):
     @patch('scripts.ai_pipeline.setup_target_repository')
     @patch('scripts.ai_pipeline.ensure_code_exists')
     @patch('scripts.ai_pipeline.generate_task_plan')
+    @patch('scripts.ai_pipeline.update_task_plan')
     @patch('scripts.ai_pipeline.run_tdd_loop')
     @patch('scripts.ai_pipeline.push_to_target_repository')
-    @patch('os.path.exists', return_value=False)
-    def test_main_manual(self, mock_exists, mock_push, mock_tdd, mock_plan, mock_ensure, mock_setup):
+    @patch('os.path.exists', side_effect=[True, False, False, False, False, False]) # prompt.txt exists, project_tasks.md does not
+    @patch('builtins.open', new_callable=mock_open, read_data="Build app")
+    def test_main_manual_new(self, mock_file, mock_exists, mock_push, mock_tdd, mock_update, mock_plan, mock_ensure, mock_setup):
         ai_pipeline.main()
         mock_setup.assert_called_once()
+        mock_ensure.assert_called_once()
+        mock_plan.assert_called_once()
+        mock_tdd.assert_called_once()
+        mock_push.assert_called_once()
 
-    @patch('sys.argv', ['ai_pipeline.py', '--issue'])
-    @patch('scripts.ai_pipeline.resolve_issue')
-    @patch('os.path.exists', return_value=False)
-    def test_main_issue(self, mock_exists, mock_resolve):
+    @patch('sys.argv', ['ai_pipeline.py', '--manual'])
+    @patch('scripts.ai_pipeline.setup_target_repository')
+    @patch('scripts.ai_pipeline.ensure_code_exists')
+    @patch('scripts.ai_pipeline.generate_task_plan')
+    @patch('scripts.ai_pipeline.update_task_plan')
+    @patch('scripts.ai_pipeline.run_tdd_loop')
+    @patch('scripts.ai_pipeline.push_to_target_repository')
+    @patch('os.path.exists', side_effect=[True, True, True, True, True, True]) # prompt.txt exists, project_tasks.md exists
+    @patch('builtins.open', new_callable=mock_open, read_data="Build app")
+    def test_main_manual_existing(self, mock_file, mock_exists, mock_push, mock_tdd, mock_update, mock_plan, mock_ensure, mock_setup):
         ai_pipeline.main()
-        mock_resolve.assert_called_once()
+        mock_setup.assert_called_once()
+        mock_update.assert_called_once()
+        mock_tdd.assert_called_once()
+        mock_push.assert_called_once()
 
     @patch('sys.argv', ['ai_pipeline.py', '--resume-with-hint'])
     @patch('scripts.ai_pipeline.resume_with_hint')
