@@ -18,22 +18,36 @@ PROJECT_TYPE = os.getenv("PROJECT_TYPE", "new")
 TARGET_REPO = os.getenv("TARGET_REPO", "")
 
 def ai_generate(prompt):
-    """Hits the local Ollama API to generate code/text."""
+    """Hits the local Ollama API to generate code/text, streaming output to stdout."""
     payload = {
         "model": MODEL_NAME,
         "prompt": prompt,
-        "stream": False,
+        "stream": True,
         "options": {
             "temperature": 0.2,
             "num_ctx": 8192
         }
     }
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=300)
+        import json
+        import sys
+        
+        response = requests.post(OLLAMA_URL, json=payload, timeout=300, stream=True)
         response.raise_for_status()
-        return response.json()['response']
+        
+        full_response = ""
+        for line in response.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                word = chunk.get("response", "")
+                full_response += word
+                sys.stdout.write(word)
+                sys.stdout.flush()
+        
+        print() # Newline after streaming completes
+        return full_response
     except Exception as e:
-        print(f"Error calling Ollama API: {e}")
+        print(f"\nError calling Ollama API: {e}")
         return ""
 
 def post_inline_comment(file_path, line_number, comment):

@@ -11,7 +11,7 @@ class TestAIPipeline(unittest.TestCase):
     @patch('requests.post')
     def test_ai_generate_success(self, mock_post):
         mock_response = MagicMock()
-        mock_response.json.return_value = {'response': 'test output'}
+        mock_response.iter_lines.return_value = [b'{"response": "test "}', b'{"response": "output"}']
         mock_post.return_value = mock_response
         self.assertEqual(ai_pipeline.ai_generate("prompt"), "test output")
 
