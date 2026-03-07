@@ -1,0 +1,84 @@
+name: Autonomous Issue Resolver
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  resolve-issue:
+    # Disable for pull requests or other types just in case
+    if: (!github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Cache Testing Virtual Environment
+        uses: actions/cache@v3
+        with:
+          path: .test_venv
+          key: ${{ runner.os }}-test-venv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-test-venv-
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          # Setup common CI testing tools if not in requirements
+          pip install pytest coverage pylint radon
+
+      - name: Determine Optimal Model (Hardware Intelligence)
+        id: hardware_scan
+        run: |
+          python scripts/select_model.py > output.log
+          MODEL_NAME=$(tail -n 1 output.log)
+          echo "SELECTED_MODEL=$MODEL_NAME" >> $GITHUB_ENV
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull $MODEL_NAME
+
+      - name: Run Autonomous Issue Resolver
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO_NAME: ${{ github.repository }}
+          OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
+          PROJECT_TYPE: "existing"
+          GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
+          COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
+          KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
+          VASTAI_OLLAMA_URL: ${{ secrets.VASTAI_OLLAMA_URL || '' }}
+          RUNPOD_OLLAMA_URL: ${{ secrets.RUNPOD_OLLAMA_URL || '' }}
+          LIGHTNING_OLLAMA_URL: ${{ secrets.LIGHTNING_OLLAMA_URL || '' }}
+          HF_OLLAMA_URL: ${{ secrets.HF_OLLAMA_URL || '' }}
+          ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
+          SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
+          PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
+        run: python scripts/ai_pipeline.py --issue
+
+      - name: Post Issue Summary Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: issue-resolver
+          number: ${{ github.event.issue.number }}
+          message: |
+            🤖 **Autonomous Issue Resolution Completed**
+            - I have generated a solution for this issue and thoroughly tested it!
+            - A Pull Request has been automatically created containing the fix.

@@ -1,0 +1,63 @@
+name: Human-in-the-Loop PR Chat
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  ai-resume:
+    # Only run on PR comments (not issue comments) and only when the bot asked for help
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@ai-hint')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.issue.pull_request.head.ref || github.head_ref }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine Optimal Model
+        run: |
+          python scripts/select_model.py > output.log
+          MODEL_NAME=$(tail -n 1 output.log)
+          echo "SELECTED_MODEL=$MODEL_NAME" >> $GITHUB_ENV
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull $MODEL_NAME
+
+      - name: Resume AI Pipeline with User Hint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO_NAME: ${{ github.repository }}
+          OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
+          GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
+          COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
+          KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
+          VASTAI_OLLAMA_URL: ${{ secrets.VASTAI_OLLAMA_URL || '' }}
+          RUNPOD_OLLAMA_URL: ${{ secrets.RUNPOD_OLLAMA_URL || '' }}
+          LIGHTNING_OLLAMA_URL: ${{ secrets.LIGHTNING_OLLAMA_URL || '' }}
+          HF_OLLAMA_URL: ${{ secrets.HF_OLLAMA_URL || '' }}
+          ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
+          SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
+          PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
+          USER_HINT: ${{ github.event.comment.body }}
+        run: python scripts/ai_pipeline.py --resume-with-hint

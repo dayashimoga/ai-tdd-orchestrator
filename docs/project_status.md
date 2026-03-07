@@ -20,6 +20,19 @@
 - ✅ **Dynamic Target Repositories:** Orchestrator can seamlessly clone existing remote projects or create brand-new GitHub repositories via PyGithub depending on `PROJECT_TYPE` inputs.
 - ✅ **Streaming Execution Observability:** Added real-time chunk streaming on Ollama HTTP queries so developers can watch generation live in CI runner logs, preventing blind-hang scenarios.
 - ✅ **Isolated Ephemeral Test Suites:** Enhanced `run-tests.sh` and `run-tests.ps1` to rapidly spin up and tear down `.test_venv` wrappers specifically to enforce >90% test coverage without cross-polluting runner environments.
+- ✅ **Context Window Optimization (Repo Map):** AST-based `scripts/repo_map.py` extracts compressed structural outlines of Python files (class names, function signatures, docstrings). The Engineer Agent uses a two-step discovery prompt to load only necessary files, preventing token overflow on large projects.
+- ✅ **CI Matrix Speedups:** Refactored `ai-review.yml` to use `actions/cache` for pip and `.test_venv` dependencies. Split lint/complexity checks into a parallel `quality-gates` matrix job, cutting CI runtimes in half.
+- ✅ **Autonomous GitHub Issue Resolver:** New `issue-resolver.yml` workflow triggers on `issues: [opened]` events. The `--issue` CLI flag causes `ai_pipeline.py` to read the issue, branch, TDD-fix it, and automatically open a Pull Request using PyGithub.
+- ✅ **Human-in-the-Loop PR Chat:** New `pr-chat.yml` workflow listens for `@ai-hint` comments on PRs. When the TDD loop is stuck after 5 iterations, it posts a help request comment. User replies with `@ai-hint` guidance, which resumes the pipeline via `--resume-with-hint`.
+- ✅ **Visual Quality Assurance via VLMs:** `scripts/visual_qa.py` screenshots generated HTML files using Playwright/Selenium and submits them to an Ollama Vision LLM (e.g., `llava`) for aesthetic assessment. Failed visual checks are fed back to the Engineer for CSS fixes.
+
+## Completed (V3 Release)
+- ✅ **A. Performance Optimizations:** Consolidated imports, deduplicated file-parsing into shared `parse_and_write_files()`, added `GIT_TIMEOUT=120s` to all subprocess calls, fixed `sys.executable` for pytest, configurable `NUM_CTX` via env var.
+- ✅ **B. Code Quality Fixes:** Added type hints to all functions, `get_github_client()` helper, `mask_secret()` for log safety, `safe_path()` with `realpath` sandboxing, ANSI-stripping `truncate_feedback()`.
+- ✅ **C. Future Enhancements:** `save_rollback_point()` / `rollback_if_worse()` automatically reverts AI changes if tests get worse. Smart error truncation (last 50 lines).
+- ✅ **D. GPU Platform Intelligence:** New `scripts/gpu_platform.py` auto-detects 11+ platforms (Colab, Kaggle, Lightning, etc.) with **automatic health-check failover**.
+- ✅ **E. CI Caching & Speed:** `run-tests.sh` and `run-tests.ps1` preserve cached venvs. `ai-review.yml` skips Ollama model download if already cached.
+- ✅ **F. Full Coverage:** Achieved **116 tests with >90% code coverage** and 100% pass rate.
 
 ## Pending (Immediate Backlog)
 - [ ] Implement Rust support (`cargo clippy`, `cargo sec`).
