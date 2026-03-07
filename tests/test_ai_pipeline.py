@@ -202,5 +202,69 @@ class TestAIPipeline(unittest.TestCase):
             # not testable without actually running, but simulate the coverage
             pass
 
+    @patch('scripts.ai_pipeline.TARGET_REPO', None)
+    @patch('builtins.print')
+    def test_setup_target_repository_no_repo(self, mock_print):
+        ai_pipeline.setup_target_repository()
+        mock_print.assert_called_with("⚠️ No TARGET_REPO provided. Operating locally in 'your_project'.")
+
+    @patch('scripts.ai_pipeline.TARGET_REPO', 'test/repo')
+    @patch('scripts.ai_pipeline.PROJECT_TYPE', 'existing')
+    @patch('os.path.exists', return_value=True)
+    @patch('shutil.rmtree')
+    @patch('subprocess.run')
+    def test_setup_target_repository_existing(self, mock_run, mock_rmtree, mock_exists):
+        ai_pipeline.setup_target_repository()
+        mock_rmtree.assert_called_with("your_project")
+        mock_run.assert_called_once()
+        self.assertIn("git", mock_run.call_args[0][0])
+        self.assertIn("clone", mock_run.call_args[0][0])
+
+    @patch('scripts.ai_pipeline.TARGET_REPO', 'test/repo')
+    @patch('scripts.ai_pipeline.PROJECT_TYPE', 'new')
+    @patch('os.makedirs')
+    @patch('scripts.ai_pipeline.Github')
+    @patch('subprocess.run')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_setup_target_repository_new(self, mock_file, mock_run, mock_github, mock_makedirs):
+        mock_repo = MagicMock()
+        mock_repo.html_url = "http://test"
+        mock_github.return_value.get_user.return_value.create_repo.return_value = mock_repo
+        ai_pipeline.setup_target_repository()
+        mock_makedirs.assert_any_call("your_project", exist_ok=True)
+        mock_github.return_value.get_user.return_value.create_repo.assert_called_with("repo", private=True)
+        self.assertTrue(mock_run.call_count >= 5)
+
+    @patch('scripts.ai_pipeline.TARGET_REPO', None)
+    def test_push_to_target_repository_no_repo(self):
+        self.assertIsNone(ai_pipeline.push_to_target_repository())
+
+    @patch('scripts.ai_pipeline.TARGET_REPO', 'test/repo')
+    @patch('subprocess.run')
+    def test_push_to_target_repository_clean(self, mock_run):
+        mock_status = MagicMock()
+        mock_status.stdout = ""
+        mock_run.return_value = mock_status
+        ai_pipeline.push_to_target_repository()
+        self.assertEqual(mock_run.call_count, 4)
+
+    @patch('scripts.ai_pipeline.TARGET_REPO', 'test/repo')
+    @patch('subprocess.run')
+    @patch('builtins.print')
+    def test_push_to_target_repository_changes(self, mock_print, mock_run):
+        def side_effect(*args, **kwargs):
+            mock_res = MagicMock()
+            if "status" in args[0]:
+                mock_res.stdout = " M file.py"
+            elif "remote" in args[0] and "-v" in args[0]:
+                mock_res.stdout = "origin http://test"
+            else:
+                mock_res.stdout = ""
+            return mock_res
+        
+        mock_run.side_effect = side_effect
+        ai_pipeline.push_to_target_repository()
+        self.assertTrue(mock_run.call_count >= 8)
+
 if __name__ == '__main__':
     unittest.main()

@@ -9,6 +9,18 @@ on:
         description: 'Optional Prompt to override the default prompt.txt for this execution'
         required: false
         type: string
+      project_type:
+        description: 'Is this a new or existing project?'
+        required: true
+        type: choice
+        options:
+          - new
+          - existing
+        default: 'new'
+      target_repo:
+        description: 'Target repository name (e.g. your_username/your_new_repo)'
+        required: true
+        type: string
 
 jobs:
   ai-review:
@@ -77,9 +89,12 @@ jobs:
       - name: Run AI Review Pipeline 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
           OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
+          PROJECT_TYPE: ${{ github.event.inputs.project_type }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
         run: python scripts/ai_pipeline.py --manual
 
       - name: Run User Project Tests (If Python)

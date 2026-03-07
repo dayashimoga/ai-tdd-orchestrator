@@ -9,10 +9,13 @@ MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
 
 # GitHub Context for Inline Reviews Context
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+TARGET_REPO_TOKEN = os.getenv("TARGET_REPO_TOKEN") or GITHUB_TOKEN
 PR_NUMBER = os.getenv("PR_NUMBER")
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 COMMIT_SHA = os.getenv("COMMIT_SHA")
 IS_LOCAL = os.getenv("LOCAL_MODE", "false").lower() == "true"
+PROJECT_TYPE = os.getenv("PROJECT_TYPE", "new")
+TARGET_REPO = os.getenv("TARGET_REPO", "")
 
 def ai_generate(prompt):
     """Hits the local Ollama API to generate code/text."""
@@ -73,6 +76,94 @@ def get_modified_files():
     except Exception as e:
         print(f"Failed to get modified files: {e}")
         return [os.path.join(r, f) for r, d, fs in os.walk("your_project") for f in fs]
+
+def setup_target_repository():
+    """Clones an existing repo or creates a new one."""
+    if not TARGET_REPO:
+        print("⚠️ No TARGET_REPO provided. Operating locally in 'your_project'.")
+        return
+
+    # Clean up workspace
+    if os.path.exists("your_project"):
+        import shutil
+        shutil.rmtree("your_project")
+
+    if PROJECT_TYPE == "existing":
+        print(f"🔄 Cloning existing project: {TARGET_REPO}")
+        clone_url = f"https://oauth2:{TARGET_REPO_TOKEN}@github.com/{TARGET_REPO}.git"
+        subprocess.run(["git", "clone", clone_url, "your_project"], check=True)
+        print("✅ Clone complete.")
+    else:
+        print(f"✨ Creating new project repository: {TARGET_REPO}")
+        os.makedirs("your_project", exist_ok=True)
+        try:
+            g = Github(TARGET_REPO_TOKEN)
+            user = g.get_user()
+            repo_name = TARGET_REPO.split("/")[-1]
+            repo = user.create_repo(repo_name, private=True)
+            print(f"✅ Created remote repository: {repo.html_url}")
+        except Exception as e:
+            print(f"⚠️ Failed to create repository (might already exist): {e}")
+
+        # Initialize local git
+        subprocess.run(["git", "init"], cwd="your_project", check=True)
+        subprocess.run(["git", "checkout", "-b", "main"], cwd="your_project")
+        
+        # Add basic workflow for new repo testing
+        workflow_dir = os.path.join("your_project", ".github", "workflows")
+        os.makedirs(workflow_dir, exist_ok=True)
+        workflow_path = os.path.join(workflow_dir, "python-test.yml")
+        with open(workflow_path, "w") as f:
+            f.write("name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: '3.11'\n      - run: pip install pytest pytest-cov\n      - run: pip install -r requirements.txt || true\n      - run: pytest --cov=./ --cov-fail-under=90")
+        
+        subprocess.run(["git", "add", "."], cwd="your_project", check=True)
+        subprocess.run(["git", "config", "user.name", "ai-orchestrator"], cwd="your_project")
+        subprocess.run(["git", "config", "user.email", "actions@github.com"], cwd="your_project")
+        subprocess.run(["git", "commit", "-m", "chore: setup AI orchestrator repo"], cwd="your_project", check=True)
+        
+        # Connect remote and push
+        remote_url = f"https://oauth2:{TARGET_REPO_TOKEN}@github.com/{TARGET_REPO}.git"
+        subprocess.run(["git", "remote", "add", "origin", remote_url], cwd="your_project", check=True)
+        try:
+            subprocess.run(["git", "push", "-u", "origin", "main"], cwd="your_project", check=True)
+            print("✅ Initializer workflow pushed to remote.")
+        except Exception as e:
+            print(f"⚠️ Failed to push initialization to remote: {e}")
+
+def push_to_target_repository():
+    """Commits and pushes changes directly to the target repo."""
+    if not TARGET_REPO:
+        return
+        
+    print(f"\n🚀 Pushing completed AI generation to {TARGET_REPO} ...")
+    try:
+        subprocess.run(["git", "config", "user.name", "ai-orchestrator"], cwd="your_project")
+        subprocess.run(["git", "config", "user.email", "actions@github.com"], cwd="your_project")
+        subprocess.run(["git", "add", "."], cwd="your_project", check=True)
+        
+        # Check if there is anything to commit
+        status = subprocess.run(["git", "status", "--porcelain"], cwd="your_project", capture_output=True, text=True)
+        if not status.stdout.strip():
+            print("✅ No changes to commit.")
+            return
+
+        commit_msg = "feat: autonomous AI generation and TDD fixes"
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd="your_project", check=True)
+        
+        # If it's an existing project, we might need to pull first to avoid conflicts, though we expect AI runs in isolated branches
+        remote_url = f"https://oauth2:{TARGET_REPO_TOKEN}@github.com/{TARGET_REPO}.git"
+        
+        # Ensure remote exists in existing clone
+        remotes = subprocess.run(["git", "remote", "-v"], cwd="your_project", capture_output=True, text=True).stdout
+        if "origin" not in remotes:
+             subprocess.run(["git", "remote", "add", "origin", remote_url], cwd="your_project", check=True)
+        else:
+             subprocess.run(["git", "remote", "set-url", "origin", remote_url], cwd="your_project", check=True)
+             
+        subprocess.run(["git", "push", "origin", "main"], cwd="your_project", check=True)
+        print("✅ Successfully pushed AI generated code to target repository.")
+    except Exception as e:
+        print(f"❌ Failed to commit and push changes: {e}")
 
 def ensure_code_exists():
     """Initial repo bootstrap rule with Multi-File extraction."""
@@ -325,10 +416,12 @@ def main():
         
     if len(sys.argv) > 1 and sys.argv[1] == "--manual":
         # New Autonomous Mode (Scaffold -> Plan -> TDD Loop)
+        setup_target_repository()
         ensure_code_exists()
         prompt_text = open("prompt.txt").read().strip() if os.path.exists("prompt.txt") else "Build a python app."
         generate_task_plan(prompt_text)
         run_tdd_loop()
+        push_to_target_repository()
     else:
         print("Standard static review pipeline disabled in favor of TDD Orchestrator.")
 
