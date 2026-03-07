@@ -30,7 +30,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Determine Optimal Model
+      - name: Check Remote GPU Availability
+        id: gpu_scan
         env:
           GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
           OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
@@ -62,12 +63,27 @@ jobs:
 
           if python check_gpu.py; then
             echo "Skipping local Ollama installation to save CI time."
+            echo "LOCAL_OLLAMA_REQUIRED=false" >> $GITHUB_ENV
           else
-            curl -fsSL https://ollama.com/install.sh | sh
-            ollama serve &
-            sleep 5
-            ollama pull $MODEL_NAME
+            echo "LOCAL_OLLAMA_REQUIRED=true" >> $GITHUB_ENV
           fi
+
+      - name: Cache Ollama Models
+        if: env.LOCAL_OLLAMA_REQUIRED == 'true'
+        uses: actions/cache@v3
+        with:
+          path: ~/.ollama/models
+          key: ${{ runner.os }}-ollama-models
+          restore-keys: |
+            ${{ runner.os }}-ollama-
+
+      - name: Install Local Ollama
+        if: env.LOCAL_OLLAMA_REQUIRED == 'true'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull ${{ env.SELECTED_MODEL }}
 
       - name: Resume AI Pipeline with User Hint
         env:

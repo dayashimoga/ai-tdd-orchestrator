@@ -109,6 +109,8 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
             current_content = []
         else:
             if current_file_path is not None:
+                if line.strip().startswith("```"):
+                    continue
                 current_content.append(line)
 
     # Write final tracked file
