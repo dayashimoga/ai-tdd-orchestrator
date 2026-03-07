@@ -72,5 +72,8 @@ lerna-debug.log*
 # Application Specific Generation Target
 your_project/
 generated_code.txt
+prompt.txt
 prompt_override.txt
 output.log
+pylint_report.txt
+complexity_report.txt

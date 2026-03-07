@@ -117,7 +117,14 @@ def setup_target_repository():
             repo = user.create_repo(repo_name, private=True)
             print(f"✅ Created remote repository: {repo.html_url}")
         except Exception as e:
-            print(f"⚠️ Failed to create repository (might already exist): {e}")
+            print(f"❌ Error: Could not create remote repository '{repo_name}': {e}")
+            if "403" in str(e) or "Forbidden" in str(e) or "404" in str(e):
+                print("👉 Hint: The default GitHub Actions token cannot create new repositories.")
+                print("👉 Please create a Personal Access Token (PAT) with 'repo' scope and add it to secrets.TARGET_REPO_TOKEN.")
+            else:
+                print("👉 Hint: If the repository already exists, please run the pipeline with project_type='existing'.")
+            import sys
+            sys.exit(1)
 
         # Initialize local git
         subprocess.run(["git", "init"], cwd="your_project", check=True)

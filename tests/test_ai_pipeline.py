@@ -235,6 +235,19 @@ class TestAIPipeline(unittest.TestCase):
         mock_github.return_value.get_user.return_value.create_repo.assert_called_with("repo", private=True)
         self.assertTrue(mock_run.call_count >= 5)
 
+    @patch('scripts.ai_pipeline.TARGET_REPO', 'test/repo')
+    @patch('scripts.ai_pipeline.PROJECT_TYPE', 'new')
+    @patch('os.makedirs')
+    @patch('scripts.ai_pipeline.Github')
+    @patch('sys.exit')
+    @patch('builtins.print')
+    def test_setup_target_repository_new_failure(self, mock_print, mock_exit, mock_github, mock_makedirs):
+        mock_exit.side_effect = SystemExit
+        mock_github.return_value.get_user.return_value.create_repo.side_effect = Exception("403 Forbidden")
+        with self.assertRaises(SystemExit):
+            ai_pipeline.setup_target_repository()
+        mock_exit.assert_called_once_with(1)
+
     @patch('scripts.ai_pipeline.TARGET_REPO', None)
     def test_push_to_target_repository_no_repo(self):
         self.assertIsNone(ai_pipeline.push_to_target_repository())

@@ -6,14 +6,15 @@ The pipeline is designed to be highly modular. By migrating away from bulky Hugg
 ## 2. Component Diagram
 ```mermaid
 graph TD
-    A[GitHub Action / Local Docker] -->|1. Triggers| B(select_model.py)
-    B -->|2. Measures RAM/VRAM| C{Ollama Server}
-    C -->|3. Loads optimal Qwen model| C
+    A[GitHub Action / Local Docker] -->|1. Setup Target Repo| R[PyGithub / Git Clone]
+    R -->|2. Measures RAM/VRAM| B(select_model.py)
+    B -->|3. Loads optimal model| C{Ollama Server}
     A -->|4. Runs| D[ai_pipeline.py]
     D -->|5. Identifies Git Diff| E[Security & Lint Tools]
     E -->|6. Passes failures| D
-    D <-->|7. Requests fixes| C
-    D -->|8. Posts Comments| F((GitHub PR API))
+    D <-->|7. Streams generation| C
+    D -->|8. Commits & Pushes Fixes| R
+    D -->|9. Posts Comments| F((GitHub PR API))
 ```
 
 ## 3. Hardware Intelligence Layer
@@ -24,10 +25,12 @@ Standard LLMs require monolithic VRAM which causes Actions runners to crash. Thi
 - `qwen2.5-coder:3b` (<14GB standard runner envelope)
 
 ## 4. Remediation Loop (`ai_pipeline.py`)
-1. **Extraction:** Discovers changed source lines via `git diff origin/main...HEAD`.
-2. **Analysis Execution:** Runs `pylint`, `eslint`, `golint`, and strict security scanners locally.
-3. **AI Injection:** Directly appends `stderr/stdout` of the tool output into a unified prompt.
-4. **Writing:** Cleans the LLM's Markdown output and forcefully overwrites the source file.
+1. **Repository Setup:** PyGithub creates a new remote repository or clones an existing one to execute tests on via isolated Docker/Venvs.
+2. **Extraction:** Discovers changed source lines via `git diff origin/main...HEAD`.
+3. **Analysis Execution:** Runs `pytest`, `pylint`, `eslint`, `golint`, and strict security scanners locally.
+4. **AI Injection:** Directly appends `stderr/stdout` of the tool output into a unified prompt.
+5. **Streaming Generaton:** Responses are streamed via `iter_lines()` back to the runner's stdout to prevent CI stalling. 
+6. **Writing & Pushing:** Cleans the LLM's Markdown output overwrites the source file, and securely pushes it back to the remote `TARGET_REPO`.
 
 ## 5. Security Toolchain
 - **Python:** `bandit` - Scans AST for hardcoded credentials, eval(), injections.

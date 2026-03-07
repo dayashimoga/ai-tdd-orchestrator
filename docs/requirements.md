@@ -4,8 +4,9 @@
 The Open-Source AI Code Reviewer is an automated CI/CD and local development tool. Its primary goal is to enforce stringent code quality, test coverage, and security, utilizing entirely free, offline-capable local LLMs. 
 
 ## 2. Functional Requirements
-### 2.1 Repository Bootstrap
-- **FR1:** If the designated project directory (`your_project/`) is empty, the system must trigger code generation based on the contents of `prompt.txt`.
+### 2.1 Repository Bootstrap & Project Targeting
+- **FR1:** The system must evaluate `PROJECT_TYPE` and `TARGET_REPO`. If `new`, the system evaluates the prompt and generates a fresh codebase mapped to a brand new remote GitHub Repository automatically built via PyGithub.
+- **FR1a:** If `existing`, the system must automatically clone the designated `TARGET_REPO` to inject fixes directly.
 
 ### 2.2 Intelligent Model Selection
 - **FR2:** The system must actively detect the host machine's available RAM and GPU VRAM.
@@ -19,9 +20,12 @@ The Open-Source AI Code Reviewer is an automated CI/CD and local development too
 ### 2.4 Inline Review Annotations
 - **FR7:** The system must utilize the standard `GITHUB_TOKEN` to post autonomous code suggestions directly on the affected lines via PR Review Comments.
 
+### 2.5 Real-time Streaming Observability
+- **FR8:** The pipeline must stream HTTP response chunks from the local Ollama API directly to the standard output (`sys.stdout`) in real-time. This ensures CI/CD jobs don't silently hang and developers can watch the LLM write code live.
+
 ## 3. Non-Functional Requirements
 ### 3.1 Quality Gates & Build Breakers
-The Action must hard fail the GitHub PR if any of the following metrics are not met:
+The Action must execute tests strictly within isolated, ephemeral Python virtual environments (`.test_venv`) to prevent polluting the host runner. It must hard fail the GitHub PR if any of the following metrics are not met:
 - **Lint Score:** Python `pylint` must be `≥ 8/10`.
 - **Test Coverage:** Python `pytest`/`coverage` must be `≥ 90%`.
 - **Complexity:** `radon` must not assign an 'F' grade to any module.
