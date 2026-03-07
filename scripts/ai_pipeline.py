@@ -235,6 +235,13 @@ def setup_target_repository() -> None:
             if "name already exists on this account" in str(e).lower() or "422" in str(e):
                 print("👉 Auto-detecting existing repository. Falling back to cloning instead of creating...")
                 PROJECT_TYPE = "existing"
+                # Ensure TARGET_REPO has the owner prefix for cloning (e.g., username/repo_name)
+                if "/" not in TARGET_REPO:
+                    try:
+                        # 'user' is already defined in the try block above
+                        TARGET_REPO = f"{user.login}/{TARGET_REPO}"
+                    except Exception:
+                        pass # Fallback to original string if PyGithub fails
                 return setup_target_repository()
 
             if "403" in str(e) or "Forbidden" in str(e) or "404" in str(e):
