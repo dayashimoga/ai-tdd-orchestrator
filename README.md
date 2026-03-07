@@ -1,6 +1,6 @@
 # 🤖 Open-Source AI Code Reviewer
 
-[![Actions Status](https://github.com/your-username/your-repo/workflows/AI%20Code%20Review%20&%20Quality%20Gates%20(Ollama%20+%20Security%20Check)/badge.svg)](https://github.com/your-username/your-repo/actions)
+[![Actions Status](https://github.com/dayashimoga/ai-tdd-orchestrator/workflows/AI%20Code%20Review%20&%20Quality%20Gates%20(Ollama%20+%20Security%20Check)/badge.svg)](https://github.com/dayashimoga/ai-tdd-orchestrator/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 An intelligent, fully open-source, and free continuous integration layer for GitHub. 
