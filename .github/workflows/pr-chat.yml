@@ -31,14 +31,43 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Determine Optimal Model
+        env:
+          GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
+          COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
+          KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
+          VASTAI_OLLAMA_URL: ${{ secrets.VASTAI_OLLAMA_URL || '' }}
+          RUNPOD_OLLAMA_URL: ${{ secrets.RUNPOD_OLLAMA_URL || '' }}
+          LIGHTNING_OLLAMA_URL: ${{ secrets.LIGHTNING_OLLAMA_URL || '' }}
+          HF_OLLAMA_URL: ${{ secrets.HF_OLLAMA_URL || '' }}
+          ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
+          SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
+          PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
         run: |
           python scripts/select_model.py > output.log
           MODEL_NAME=$(tail -n 1 output.log)
           echo "SELECTED_MODEL=$MODEL_NAME" >> $GITHUB_ENV
-          curl -fsSL https://ollama.com/install.sh | sh
-          ollama serve &
-          sleep 5
-          ollama pull $MODEL_NAME
+
+          cat << 'EOF' > check_gpu.py
+          import sys, os
+          sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
+          import scripts.gpu_platform as gpu_platform
+          platform, url = gpu_platform.select_platform()
+          if platform != "local":
+              print(f"✅ Found active remote GPU: {platform}")
+              sys.exit(0)
+          sys.exit(1)
+          EOF
+
+          if python check_gpu.py; then
+            echo "Skipping local Ollama installation to save CI time."
+          else
+            curl -fsSL https://ollama.com/install.sh | sh
+            ollama serve &
+            sleep 5
+            ollama pull $MODEL_NAME
+          fi
 
       - name: Resume AI Pipeline with User Hint
         env:

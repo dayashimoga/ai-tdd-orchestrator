@@ -24,9 +24,10 @@ import scripts.gpu_platform as gpu_platform
 # ---------------------------------------------------------------------------
 # Auto-detect the best GPU platform from environment variables
 _detected_platform, _detected_url = gpu_platform.select_platform()
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", _detected_url)
-MODEL_NAME: str = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
-NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+# os.getenv returns "" if the secret is empty but passed by GH Actions (${{ secrets.X || '' }})
+OLLAMA_URL: str = os.getenv("OLLAMA_URL") or _detected_url
+MODEL_NAME: str = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
+NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX") or "8192")
 
 GITHUB_TOKEN: Optional[str] = os.getenv("GITHUB_TOKEN")
 TARGET_REPO_TOKEN: Optional[str] = os.getenv("TARGET_REPO_TOKEN") or GITHUB_TOKEN
@@ -200,6 +201,7 @@ def get_modified_files() -> List[str]:
 
 def setup_target_repository() -> None:
     """Clones an existing repo or creates a new one."""
+    global TARGET_REPO
     if not TARGET_REPO:
         print("⚠️ No TARGET_REPO provided. Operating locally in 'your_project'.")
         return
@@ -221,6 +223,10 @@ def setup_target_repository() -> None:
             repo_name = TARGET_REPO.split("/")[-1]
             repo = user.create_repo(repo_name, private=True)
             print(f"✅ Created remote repository: {repo.html_url}")
+            
+            # Update TARGET_REPO to the full full_name (e.g., username/repo_name)
+            # so the remote_url below is correctly formatted.
+            TARGET_REPO = repo.full_name
         except Exception as e:
             error_msg = mask_secret(str(e), TARGET_REPO_TOKEN)
             print(f"❌ Error: Could not create remote repository: {error_msg}")
