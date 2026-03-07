@@ -201,7 +201,7 @@ def get_modified_files() -> List[str]:
 
 def setup_target_repository() -> None:
     """Clones an existing repo or creates a new one."""
-    global TARGET_REPO
+    global TARGET_REPO, PROJECT_TYPE
     if not TARGET_REPO:
         print("⚠️ No TARGET_REPO provided. Operating locally in 'your_project'.")
         return
@@ -230,6 +230,13 @@ def setup_target_repository() -> None:
         except Exception as e:
             error_msg = mask_secret(str(e), TARGET_REPO_TOKEN)
             print(f"❌ Error: Could not create remote repository: {error_msg}")
+            
+            # Auto-fallback: if the repo already exists, switch to 'existing' mode
+            if "name already exists on this account" in str(e).lower() or "422" in str(e):
+                print("👉 Auto-detecting existing repository. Falling back to cloning instead of creating...")
+                PROJECT_TYPE = "existing"
+                return setup_target_repository()
+
             if "403" in str(e) or "Forbidden" in str(e) or "404" in str(e):
                 print("👉 Hint: The default GitHub Actions token cannot create new repositories.")
                 print("👉 Please create a Personal Access Token (PAT) with 'repo' scope and add it to secrets.TARGET_REPO_TOKEN.")
