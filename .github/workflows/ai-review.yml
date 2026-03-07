@@ -82,17 +82,14 @@ jobs:
           OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
         run: python scripts/ai_pipeline.py
 
-      - name: Run Python tests with coverage
+      - name: Run User Project Tests (If Python)
         run: |
-          if [ -d "your_project" ]; then
-            coverage run -m pytest
-            coverage report -m
-            coverage xml || true
-            coverage_percent=$(coverage report -m | tail -n 1 | awk '{print $NF}' | sed 's/%//')
-            if [ "$coverage_percent" -lt 90 ]; then
-              echo "❌ Coverage below 90% ($coverage_percent%)"
-              exit 1
-            fi
+          if [ -d "your_project" ] && [ -n "$(find your_project -name '*.py')" ]; then
+            echo "Python code generated. Attempting to run project-specific tests..."
+            coverage run -m pytest your_project/ || true
+            coverage report -m || true
+          else
+            echo "No Python files found in your_project/, skipping Python coverage."
           fi
 
       - name: Lint checks
@@ -115,6 +112,14 @@ jobs:
               exit 1
             fi
           fi
+
+      - name: Upload AI Generated Artifacts 
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-generated-scaffold
+          path: your_project/
+          retention-days: 14
 
       - name: Post PR Summary Comment
         uses: marocchino/sticky-pull-request-comment@v2

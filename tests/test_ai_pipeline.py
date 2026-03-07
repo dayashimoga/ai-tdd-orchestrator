@@ -42,74 +42,101 @@ class TestAIPipeline(unittest.TestCase):
     def test_get_modified_files(self, mock_sub):
         self.assertEqual(ai_pipeline.get_modified_files(), ["your_project/new.py", "your_project/style.css"])
 
-    @patch('subprocess.getoutput')
-    def test_run_critic(self, mock_getoutput):
-        mock_getoutput.side_effect = ["pylint error", "bandit error", "eslint error", "njsscan error", "golint error", "gosec error", "html error", "css error", "eslint ts error"]
-        self.assertEqual(ai_pipeline.run_critic("f.py", "Python"), "pylint error\nbandit error\n")
-        self.assertEqual(ai_pipeline.run_critic("f.js", "JavaScript"), "eslint error\nnjsscan error\n")
-        self.assertEqual(ai_pipeline.run_critic("f.go", "Go"), "golint error\ngosec error\n")
-        self.assertEqual(ai_pipeline.run_critic("f.html", "HTML"), "html error\n")
-        self.assertEqual(ai_pipeline.run_critic("f.css", "CSS"), "css error\n")
-        self.assertEqual(ai_pipeline.run_critic("f.ts", "TypeScript"), "eslint ts error\n")
-
     @patch('builtins.open', new_callable=mock_open)
-    @patch('scripts.ai_pipeline.ai_generate', return_value="```python\nfixed_code()\n```")
-    def test_run_engineer(self, mock_generate, mock_file):
-        fixed = ai_pipeline.run_engineer("f.py", "bad_code()", "error", "Python")
-        self.assertEqual(fixed, "fixed_code()")
-        mock_file().write.assert_called_with("fixed_code()")
+    @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task 1")
+    @patch('builtins.print')
+    def test_generate_task_plan(self, mock_print, mock_generate, mock_file):
+        ai_pipeline.generate_task_plan("Do something")
+        mock_file.assert_called_with("your_project/project_tasks.md", "w")
+        mock_file().write.assert_called_with("- [ ] Task 1")
 
-    @patch('scripts.ai_pipeline.post_inline_comment')
-    @patch('scripts.ai_pipeline.ai_generate', return_value="COMMENT_LINE: 5|Fixed security bug")
-    def test_run_reviewer(self, mock_generate, mock_post):
-        ai_pipeline.run_reviewer("f.py", "bad", "good", "Python")
-        mock_post.assert_called_with("f.py", 5, "Fixed security bug")
-
-    @patch('scripts.ai_pipeline.get_modified_files', return_value=["your_project/app.py"])
-    @patch('os.path.exists', return_value=True)
-    @patch('builtins.open', new_callable=mock_open, read_data="bad_code")
-    @patch('scripts.ai_pipeline.run_critic', side_effect=["error", "clear"])
-    @patch('scripts.ai_pipeline.run_engineer', return_value="good_code")
-    @patch('scripts.ai_pipeline.run_reviewer')
-    @patch('scripts.ai_pipeline.ensure_code_exists')
-    def test_run_pipeline(self, mock_ensure, mock_reviewer, mock_eng, mock_critic, mock_file, mock_exists, mock_get):
-        ai_pipeline.run_pipeline(max_iterations=2)
-        mock_critic.assert_called()
-        mock_eng.assert_called_once()
-        mock_reviewer.assert_called_once()
-
-    @patch('os.walk', return_value=[('your_project', (), ())])
-    @patch('os.path.exists', return_value=True)
-    @patch('builtins.open', new_callable=mock_open, read_data="prompt")
+    @patch('os.walk', return_value=[('your_project', (), ('app.py',))])
+    @patch('builtins.open', new_callable=mock_open, read_data="code here")
     @patch('os.makedirs')
-    @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: index.html ---\n<h1>Hello</h1>\n--- FILE: css/style.css ---\ncolor: red;")
-    def test_ensure_code_exists_multi_file(self, mock_gen, mock_mkdir, mock_file, mock_exists, mock_walk):
-        ai_pipeline.ensure_code_exists()
-        mock_gen.assert_called_once()
-        # Ensure os.makedirs was called for subdirectories and root
-        mock_mkdir.assert_any_call("your_project", exist_ok=True)
-        # Ensure it wrote to multiple files based on the parsed delimiters
-        mock_file.assert_any_call(os.path.join("your_project", "index.html"), "w")
-        mock_file().write.assert_any_call("<h1>Hello</h1>")
-        mock_file.assert_any_call(os.path.join("your_project", "css", "style.css"), "w")
-        mock_file().write.assert_any_call("color: red;")
+    @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: test.py ---\nprint('ok')")
+    def test_execute_task(self, mock_gen, mock_mkdir, mock_file, mock_walk):
+        ai_pipeline.execute_task("Build it")
+        mock_file.assert_any_call(os.path.join("your_project", "test.py"), "w", encoding='utf-8')
+        mock_file().write.assert_any_call("print('ok')")
 
-    @patch('os.walk', return_value=[('your_project', (), ())])
+    @patch('subprocess.run')
+    def test_run_pytest_validation_success(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "Coverage Achieved"
+        mock_run.return_value = mock_result
+        success, output = ai_pipeline.run_pytest_validation()
+        self.assertTrue(success)
+        self.assertEqual(output, "Coverage Achieved")
+
+    @patch('subprocess.run')
+    def test_run_pytest_validation_failure(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = "Coverage Failed"
+        mock_result.stderr = "Traceback"
+        mock_run.return_value = mock_result
+        success, output = ai_pipeline.run_pytest_validation()
+        self.assertFalse(success)
+        self.assertTrue("Coverage Failed" in output)
+
+    @patch('subprocess.run', side_effect=Exception("Subprocess Error"))
+    def test_run_pytest_validation_exception(self, mock_run):
+        success, output = ai_pipeline.run_pytest_validation()
+        self.assertFalse(success)
+        self.assertEqual(output, "Subprocess Error")
+
     @patch('os.path.exists', return_value=True)
-    @patch('builtins.open', new_callable=mock_open, read_data="prompt")
-    @patch('os.makedirs')
-    @patch('scripts.ai_pipeline.ai_generate', return_value="Just some bad plain code response without delimiters")
-    def test_ensure_code_exists_fallback(self, mock_gen, mock_mkdir, mock_file, mock_exists, mock_walk):
-        ai_pipeline.ensure_code_exists()
-        # Ensure fallback file was created
-        mock_file.assert_any_call("your_project/generated_code.txt", "w")
-        mock_file().write.assert_any_call("Just some bad plain code response without delimiters")
+    @patch('builtins.open', new_callable=mock_open, read_data="- [ ] Task 1\n- [x] Task 2")
+    @patch('scripts.ai_pipeline.execute_task')
+    @patch('scripts.ai_pipeline.run_pytest_validation', return_value=(True, "OK"))
+    def test_run_tdd_loop_success(self, mock_pytest, mock_execute, mock_file, mock_exists):
+        # The loop reads, finds the uncompleted task, executes, passes tests, and writes back [x]
+        ai_pipeline.run_tdd_loop(max_iterations=1)
+        mock_execute.assert_called_once_with("Task 1")
+        mock_file().writelines.assert_called()
+
+    @patch('os.path.exists', return_value=True)
+    @patch('builtins.open', new_callable=mock_open, read_data="- [ ] Task 1")
+    @patch('scripts.ai_pipeline.execute_task')
+    @patch('scripts.ai_pipeline.run_pytest_validation', return_value=(False, "Failed!"))
+    def test_run_tdd_loop_failure(self, mock_pytest, mock_execute, mock_file, mock_exists):
+        # Task execution fails, loops back execution with bug context
+        ai_pipeline.run_tdd_loop(max_iterations=1)
+        # Should be called twice (the initial task, and then the retry attempt fed with stack trace)
+        self.assertEqual(mock_execute.call_count, 2)
+
+    @patch('os.path.exists', return_value=False)
+    def test_run_tdd_loop_no_file(self, mock_exists):
+        # Should gracefully exit loop if file doesn't exist
+        ai_pipeline.run_tdd_loop()
+
+    @patch('os.path.exists', return_value=True)
+    @patch('builtins.open', new_callable=mock_open, read_data="- [x] Task 1\n- [x] Task 2")
+    def test_run_tdd_loop_all_done(self, mock_file, mock_exists):
+        # Should exit immediately if all tasks are complete
+        ai_pipeline.run_tdd_loop()
 
     @patch('sys.argv', ['ai_pipeline.py'])
-    @patch('scripts.ai_pipeline.run_pipeline')
-    def test_main_execution(self, mock_run):
+    @patch('builtins.print')
+    @patch('os.path.exists', return_value=True)
+    @patch('builtins.open', new_callable=mock_open, read_data="Dummy Prompt")
+    def test_main_execution_standard(self, mock_file, mock_exists, mock_print):
         ai_pipeline.main()
-        mock_run.assert_called_once()
+        mock_print.assert_any_call("Dummy Prompt")
+        mock_print.assert_any_call("Standard static review pipeline disabled in favor of TDD Orchestrator.")
+
+    @patch('sys.argv', ['ai_pipeline.py', '--manual'])
+    @patch('scripts.ai_pipeline.ensure_code_exists')
+    @patch('scripts.ai_pipeline.generate_task_plan')
+    @patch('scripts.ai_pipeline.run_tdd_loop')
+    @patch('os.path.exists', return_value=True)
+    @patch('builtins.open', new_callable=mock_open, read_data="Task Prompt")
+    def test_main_execution_manual(self, mock_file, mock_exists, mock_tdd, mock_plan, mock_ensure):
+        ai_pipeline.main()
+        mock_ensure.assert_called_once()
+        mock_plan.assert_called_once_with("Task Prompt")
+        mock_tdd.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()
