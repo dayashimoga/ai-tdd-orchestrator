@@ -238,16 +238,22 @@ def run_pytest_validation():
         result = subprocess.run(
             ["python", "-m", "pytest", "your_project/", "--cov=your_project/", "--cov-fail-under=90", "--cov-report=term-missing"],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=60
         )
         if result.returncode == 0:
             print("✅ Tests Passed & Coverage Achieved!")
+            print(result.stdout)
             return True, result.stdout
         else:
             print("❌ Test failures or missing coverage detected:")
             print(result.stdout)
             print(result.stderr)
             return False, result.stdout + "\n" + result.stderr
+    except subprocess.TimeoutExpired as e:
+        print(f"❌ Pytest timed out after 60 seconds")
+        timeout_msg = f"Pytest timed out executing the suite: {e}"
+        return False, timeout_msg
     except Exception as e:
         print(f"Failed to execute Pytest: {e}")
         return False, str(e)
