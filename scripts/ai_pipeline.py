@@ -1,13 +1,14 @@
-"""AI TDD Orchestrator Pipeline — V3 Optimized.
+"""AI TDD Orchestrator Pipeline — V5 Optimized.
 
 Autonomous code generation, testing, and remediation using local LLMs.
-Supports: --manual, --issue, --resume-with-hint CLI modes.
+Supports: --manual, --issue, --resume-with-hint, --index-docs, --dry-run CLI modes.
 """
 import subprocess
 import os
 import sys
 import json
 import re
+import ast as ast_module
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,9 +28,19 @@ import scripts.rag_engine as rag_engine
 # Configuration (all env-configurable)
 # ---------------------------------------------------------------------------
 # Auto-detect the best GPU platform from environment variables
-_detected_platform, _detected_url = gpu_platform.select_platform()
-# os.getenv returns "" if the secret is empty but passed by GH Actions (${{ secrets.X || '' }})
-OLLAMA_URL: str = os.getenv("OLLAMA_URL") or _detected_url
+# PS2: Deferred to first use — do NOT call at import time to save ~5s startup
+_detected_platform: Optional[str] = None
+_detected_url: Optional[str] = None
+
+def _get_platform_url() -> str:
+    """PS2: Lazy platform detection — only called when first needed."""
+    global _detected_platform, _detected_url
+    if _detected_url is None:
+        _detected_platform, _detected_url = gpu_platform.select_platform()
+    return _detected_url
+
+# os.getenv returns "" if the secret is empty but passed by GH Actions
+OLLAMA_URL: str = os.getenv("OLLAMA_URL") or ""
 MODEL_NAME: str = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
 NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX") or "8192")
 MAX_TDD_ITERATIONS: int = int(os.getenv("MAX_TDD_ITERATIONS") or "5")
@@ -45,6 +56,14 @@ TARGET_REPO: str = os.getenv("TARGET_REPO", "")
 DRY_RUN: bool = "--dry-run" in sys.argv
 
 GIT_TIMEOUT: int = 120  # seconds — prevents infinite CI hangs
+
+# ---------------------------------------------------------------------------
+# Compiled Regex Patterns (O4) — compiled once at module load, not per-call
+# ---------------------------------------------------------------------------
+_RE_ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+_RE_FILE_DELIMITER = re.compile(r'^--- FILE:\s*(.+?)\s*---$', re.MULTILINE)
+_RE_CODE_BLOCK = re.compile(r'```(?:[a-zA-Z0-9_-]+)?\s*\n(.*?)\n?```', re.DOTALL)
+_RE_ERROR_TYPES = re.compile(r'ImportError|SyntaxError|NameError|ModuleNotFoundError|TypeError|AttributeError|IndentationError')
 
 # Runtime caches (cleared between tasks, preserved across retries)
 _repo_map_cache: Optional[str] = None
@@ -85,23 +104,94 @@ def git_run(args: List[str], cwd: str = "your_project", **kwargs) -> subprocess.
 
 def truncate_feedback(feedback: str, max_lines: int = 50) -> str:
     """Truncates error feedback and strips ANSI escape codes."""
-    # Strip ANSI escape sequences
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    clean = ansi_escape.sub('', feedback)
+    clean = _RE_ANSI_ESCAPE.sub('', feedback)
     lines = clean.strip().split('\n')
     if len(lines) > max_lines:
         return '\n'.join(lines[-max_lines:])
     return clean
 
 
+def extract_test_failures(raw_feedback: str) -> str:
+    """TF1: Extracts only the failing test names and assertion errors from pytest output.
+
+    Instead of dumping the full traceback into the retry prompt, this extracts
+    a concise summary that is more actionable for the LLM.
+    """
+    lines = raw_feedback.split('\n')
+    failures: List[str] = []
+    current_failure = ""
+    in_failure = False
+
+    for line in lines:
+        # Capture FAILED test names
+        if 'FAILED' in line and '::' in line:
+            failures.append(line.strip())
+        # Capture assertion errors
+        if 'AssertionError' in line or 'assert ' in line.lower():
+            failures.append(line.strip())
+        # Capture key error lines (E keyword in pytest short summary)
+        if line.strip().startswith('E ') and len(line.strip()) > 2:
+            failures.append(line.strip())
+        # Capture import/syntax/name errors (O5: compiled regex)
+        if _RE_ERROR_TYPES.search(line):
+            failures.append(line.strip())
+        # Capture short test summary info block
+        if 'short test summary' in line.lower():
+            in_failure = True
+            continue
+        if in_failure and line.strip():
+            failures.append(line.strip())
+        if in_failure and not line.strip():
+            in_failure = False
+
+    if not failures:
+        # Fallback: return truncated version
+        return truncate_feedback(raw_feedback, max_lines=30)
+
+    return '\n'.join(dict.fromkeys(failures))  # deduplicate while preserving order
+
+
+def validate_python_syntax(content: str, file_path: str) -> Tuple[bool, str]:
+    """E5: Validates Python syntax using ast.parse before writing to disk."""
+    if not file_path.endswith('.py'):
+        return True, ""
+    try:
+        ast_module.parse(content)
+        return True, ""
+    except SyntaxError as e:
+        return False, f"SyntaxError in {file_path} line {e.lineno}: {e.msg}"
+
+
+def validate_llm_response(raw_output: str) -> Tuple[bool, str]:
+    """E8: Validates the LLM response contains expected file delimiters.
+
+    Returns (is_valid, error_message). If invalid, the caller should
+    retry the LLM call immediately instead of running the test suite.
+    """
+    if not raw_output or not raw_output.strip():
+        return False, "LLM returned empty response"
+
+    # Check for at least one file delimiter (O4: compiled regex)
+    file_blocks = _RE_FILE_DELIMITER.findall(raw_output)
+    if not file_blocks:
+        # Check if the LLM returned conversational text instead of code
+        if len(raw_output) > 50 and '```' not in raw_output:
+            return False, "LLM response contains no code blocks or file delimiters"
+        return False, "No '--- FILE: path ---' delimiters found in response"
+
+    return True, ""
+
+
 def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> int:
     """Parses LLM '--- FILE: path ---' delimited output and writes files.
 
+    Includes E5 syntax validation before writing Python files.
     Returns the number of files written.
     """
     files_written = 0
-    # Split by standard delimiter
-    parts = re.split(r'^--- FILE:\s*(.+?)\s*---$', raw_output, flags=re.MULTILINE)
+    syntax_errors: List[str] = []
+    # Split by standard delimiter (O4: compiled regex)
+    parts = _RE_FILE_DELIMITER.split(raw_output)
     
     for i in range(1, len(parts), 2):
         if i + 1 >= len(parts):
@@ -110,14 +200,20 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
         file_path = parts[i].strip()
         raw_content = parts[i+1]
         
-        # Strip trailing conversational fluff by strictly taking what's inside the FIRST markdown block if present
-        match = re.search(r'```(?:[a-zA-Z0-9_-]+)?\s*\n(.*?)\n?```', raw_content, re.DOTALL)
+        # Strip trailing conversational fluff (O4: compiled regex)
+        match = _RE_CODE_BLOCK.search(raw_content)
         if match:
             content = match.group(1).strip()
         else:
             content = raw_content.strip()
             
         if content:
+            # E5: Syntax validation for Python files
+            valid, err = validate_python_syntax(content, file_path)
+            if not valid:
+                syntax_errors.append(err)
+                print(f"⚠️ {err} — writing anyway (will be caught by tests)")
+
             validated = safe_path(file_path, target_dir)
             if validated:
                 write_path = os.path.join(target_dir, validated) if not validated.startswith(target_dir) else validated
@@ -125,6 +221,9 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
                 with open(write_path, "w", encoding="utf-8") as f:
                     f.write(content + "\n")
                 files_written += 1
+
+    if syntax_errors:
+        print(f"\n⚠️ {len(syntax_errors)} Python file(s) had syntax errors pre-write")
 
     return files_written
 
@@ -295,7 +394,8 @@ def ensure_code_exists() -> None:
     supported_ext = (".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".html", ".css")
     if not any(f.endswith(supported_ext) for _, _, files in os.walk("your_project") for f in files):
         if os.path.exists("prompt.txt"):
-            prompt = open("prompt.txt").read()
+            with open("prompt.txt", "r") as pf:
+                prompt = pf.read()
             advanced_prompt = (
                 f"You are bootstrapping a new project. Project Requirements:\n{prompt}\n\n"
                 "Generate a complete, fully functional initial implementation. DO NOT generate dummy code or placeholders.\n"
@@ -370,7 +470,12 @@ def update_task_plan(new_prompt: str) -> None:
         with open(req_path, "w", encoding="utf-8") as f:
             f.write(f"# Project Requirements\n\n{new_prompt}\n")
 
-    with open("your_project/project_tasks.md", "r", encoding="utf-8") as f:
+    tasks_path = "your_project/project_tasks.md"
+    if not os.path.exists(tasks_path):
+        print("⚠️ No tasks.md found to update.")
+        return
+
+    with open(tasks_path, "r", encoding="utf-8") as f:
         existing_plan = f.read()
 
     plan_prompt = (
@@ -426,11 +531,9 @@ def execute_task(task_description: str, use_cache: bool = False) -> None:
         )
         print("🔍 Inspecting Repo Map to determine context window...")
 
-        payload = {"model": MODEL_NAME, "prompt": discovery_prompt, "stream": False, "options": {"temperature": 0.1, "num_ctx": 4096}}
+        # CG2: Use llm_router instead of raw requests.post to respect LLM_PROVIDER
         try:
-            response = requests.post(OLLAMA_URL, json=payload, timeout=120)
-            response.raise_for_status()
-            requested_files_str = response.json().get("response", "NONE")
+            requested_files_str = llm_router.generate(discovery_prompt, stream=False, temperature=0.1, num_ctx=4096)
         except Exception as e:
             print(f"Failed to query for files: {e}")
             requested_files_str = "NONE"
@@ -464,17 +567,32 @@ def execute_task(task_description: str, use_cache: bool = False) -> None:
     if rag_context:
         print(f"📚 RAG: Injected reference document context into prompt")
 
+    # CG1 + CG4: Enhanced engineer prompt with few-shot example and strict enforcement
     engineer_prompt = (
-        f"You are the Engineer Agent. You are working on this project:\n\n"
+        f"You are the Engineer Agent. You MUST output ONLY code blocks using the exact delimiter format shown below.\n"
+        f"Do NOT include explanations, commentary, or conversation. Output ONLY code.\n\n"
         f"--- PROJECT REQUIREMENTS ---\n{req_context}\n\n"
         f"{rag_context}"
         f"Your current granular task is: {task_description}\n\n"
         f"Here is your optimized project context:\n{context}\n\n"
-        "Generate fully functional, production-ready code to fulfill the task. DO NOT generate dummy or placeholder code.\n"
-        "If the task involves testing, ensure you use `pytest`.\n"
-        "You must organize your output into distinct files using exactly this format:\n"
-        "--- FILE: <file_path_relative_to_root> ---\n```python\n<code>\n```\n\n"
-        "Return ONLY the delimiter blocks and exact file contents."
+        "Generate fully functional, production-ready code. DO NOT generate dummy or placeholder code.\n"
+        "If the task involves testing, use `pytest` with descriptive test names.\n\n"
+        "OUTPUT FORMAT (you MUST follow this exactly):\n"
+        "--- FILE: src/main.py ---\n"
+        "```python\n"
+        "def main():\n"
+        "    print('Hello World')\n\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+        "```\n\n"
+        "--- FILE: tests/test_main.py ---\n"
+        "```python\n"
+        "from src.main import main\n\n"
+        "def test_main(capsys):\n"
+        "    main()\n"
+        "    assert capsys.readouterr().out.strip() == 'Hello World'\n"
+        "```\n\n"
+        "Now generate your code following this EXACT format. Output ONLY '--- FILE:' blocks and code. NO other text."
     )
 
     if DRY_RUN:
@@ -482,15 +600,24 @@ def execute_task(task_description: str, use_cache: bool = False) -> None:
         print(engineer_prompt[:500] + "...")
         return
 
-    raw_output = ai_generate(engineer_prompt)
+    # E8: Retry LLM if response is malformed (up to 2 extra attempts)
+    raw_output = ""
+    for attempt in range(3):
+        raw_output = ai_generate(engineer_prompt)
+        valid, err = validate_llm_response(raw_output)
+        if valid:
+            break
+        print(f"⚠️ LLM response validation failed (attempt {attempt + 1}/3): {err}")
+        if attempt < 2:
+            print("🔄 Retrying LLM call...")
+
     parse_and_write_files(raw_output, "your_project")
     # Invalidate repo map cache after files change
     _repo_map_cache = None
 
 
-def detect_test_command() -> List[str]:
+def detect_test_command(project_dir: str = "your_project") -> List[str]:
     """E10: Auto-detect the appropriate test framework based on project files."""
-    project_dir = "your_project"
     # Check for Python (pytest)
     if any(f.endswith(".py") for _, _, files in os.walk(project_dir) for f in files):
         return [sys.executable, "-m", "pytest", f"{project_dir}/", f"--cov={project_dir}/", "--cov-fail-under=90", "--cov-report=term-missing"]
@@ -512,11 +639,22 @@ def detect_test_command() -> List[str]:
     return [sys.executable, "-m", "pytest", f"{project_dir}/", f"--cov={project_dir}/", "--cov-fail-under=90", "--cov-report=term-missing"]
 
 
-def run_pytest_validation() -> Tuple[bool, str]:
-    """Execute the detected test framework natively to enforce TDD behavior (E10)."""
+def run_pytest_validation(retry_mode: bool = False) -> Tuple[bool, str]:
+    """Execute the detected test framework natively to enforce TDD behavior.
+
+    Args:
+        retry_mode: If True, uses --lf (last-failed) to only re-run failing tests (TF3).
+    """
     test_cmd = detect_test_command()
     framework_name = "pytest" if "pytest" in str(test_cmd) else test_cmd[0]
-    print(f"\n[TDD Loop] Running {framework_name} Suite...")
+
+    # TF3: On retries, only re-run failing tests for speed
+    if retry_mode and "pytest" in str(test_cmd):
+        test_cmd = test_cmd + ["--lf"]
+        print(f"\n[TDD Loop] Running {framework_name} (last-failed only)...")
+    else:
+        print(f"\n[TDD Loop] Running {framework_name} Suite...")
+
     try:
         result = subprocess.run(
             test_cmd,
@@ -555,22 +693,23 @@ def send_webhook_notification(message: str) -> None:
 
 def estimate_gpu_cost(elapsed_seconds: float) -> str:
     """E8: Estimates GPU cost based on platform pricing and elapsed time."""
-    _platform, _ = gpu_platform.select_platform(use_failover=False)
-    info = gpu_platform.get_platform_info(_platform)
-    cost_str = info.get("cost")
-    if not cost_str or info.get("free"):
-        return "Free"
-    # Parse cost like "$0.30/hr"
     try:
+        _platform, _ = gpu_platform.select_platform(use_failover=False)
+        info = gpu_platform.get_platform_info(_platform)
+        cost_str = info.get("cost")
+        if not cost_str or info.get("free"):
+            return "Free"
+        # Parse cost like "$0.30/hr"
         import re as _re
         match = _re.search(r'\$([\d.]+)', cost_str)
         if match:
             hourly = float(match.group(1))
             estimated = (elapsed_seconds / 3600) * hourly
             return f"~${estimated:.4f} ({cost_str})"
-    except Exception:
-        pass
-    return cost_str
+        return cost_str
+    except Exception as e:
+        print(f"⚠️ Cost estimation error: {e}")
+        return "Unknown"
 
 
 def save_rollback_point() -> Optional[str]:
@@ -599,7 +738,15 @@ def rollback_if_worse(rollback_hash: Optional[str], pre_test_result: bool) -> No
 
 
 def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
-    """Orchestrates the continuous planning, execution, and testing loop."""
+    """Orchestrates the continuous planning, execution, and testing loop.
+
+    Features:
+    - TF1: Smart error extraction (assertion errors only)
+    - TF2: Progressive retry strategy (escalating context/temperature)
+    - TF3: pytest --lf on retries
+    - E3: Conversation memory across iterations
+    - E7: Webhook notifications
+    """
     print("\n==============================================")
     print(f"🔄 TDD ORCHESTRATOR: ENGAGED (Max Iterations: {max_iterations})")
     print("==============================================")
@@ -608,6 +755,9 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
     completed_tasks: List[str] = []
     failed_tasks: List[str] = []
     loop_start = time.time()
+    retry_count = 0  # TF2: Track consecutive retries for the same task
+    iteration_memory: List[str] = []  # E3: What the LLM tried in previous iterations
+    last_coverage_output = ""  # TF4: Reuse coverage stats
 
     for iteration in range(max_iterations):
         if not os.path.exists("your_project/project_tasks.md"):
@@ -627,9 +777,49 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                 print(f"🔄 ITERATION {iteration + 1}/{max_iterations}")
                 is_retry = bool(current_feedback)
                 if is_retry:
-                    print(f"🎯 PURPOSE: Fixing failing tests for '{base_task_description}'")
-                    task_prompt = f"FIX PREVIOUS BUG For Task: '{base_task_description}'. The tests threw this trace: {current_feedback}"
+                    retry_count += 1
+                    # TF1: Extract only the key failures for concise feedback
+                    concise_feedback = extract_test_failures(current_feedback)
+                    print(f"🎯 PURPOSE: Fixing failing tests for '{base_task_description}' (retry #{retry_count})")
+
+                    # TF2: Progressive retry strategy
+                    if retry_count == 1:
+                        task_prompt = (
+                            f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
+                            f"Test failures:\n{concise_feedback}"
+                        )
+                    elif retry_count == 2:
+                        # Include the full failing test file for more context
+                        test_files_context = ""
+                        for root, _, files in os.walk("your_project"):
+                            for tf in files:
+                                if tf.startswith("test_") and tf.endswith(".py"):
+                                    test_path = os.path.join(root, tf)
+                                    try:
+                                        with open(test_path, "r") as ff:
+                                            test_files_context += f"\n--- TEST FILE: {test_path} ---\n{ff.read()}\n"
+                                    except Exception:
+                                        pass
+                        task_prompt = (
+                            f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
+                            f"Test failures:\n{concise_feedback}\n\n"
+                            f"Here are the full test files so you can see exactly what is expected:\n{test_files_context}"
+                        )
+                    else:
+                        # Retry 3+: Include conversation memory + expand context
+                        memory_text = "\n".join(f"- Attempt {j+1}: {m}" for j, m in enumerate(iteration_memory[-3:]))
+                        task_prompt = (
+                            f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
+                            f"Test failures:\n{concise_feedback}\n\n"
+                            f"IMPORTANT: Previous fix attempts did NOT work. Here is what was tried:\n{memory_text}\n\n"
+                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes."
+                        )
+
+                    # E3: Record what we're about to try
+                    iteration_memory.append(f"Fixing '{base_task_description}' - errors: {concise_feedback[:200]}")
                 else:
+                    retry_count = 0
+                    iteration_memory = []
                     print(f"🎯 PURPOSE: Implementing new task: '{base_task_description}'")
                     task_prompt = base_task_description
                 print("==============================================\n")
@@ -637,7 +827,8 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                 rollback_hash = save_rollback_point()
                 execute_task(task_prompt, use_cache=is_retry)
 
-                success, feedback = run_pytest_validation()
+                # TF3: Use --lf on retries to only re-run failing tests
+                success, feedback = run_pytest_validation(retry_mode=is_retry)
                 if success:
                     # Run Visual QA if HTML files exist
                     try:
@@ -660,6 +851,7 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                     print(f"✅ Marked Task as Complete: {base_task_description}")
                     print(f"⏱ Iteration {iteration + 1} completed in {elapsed:.1f}s")
                     completed_tasks.append(base_task_description)
+                    last_coverage_output = feedback  # TF4: Save for reuse
 
                     status_text = "".join(tasks)
                     print("\n📈 CURRENT PROJECT STATUS:")
@@ -672,6 +864,8 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                             f.write(status_text + "\n\n")
                             
                     current_feedback = ""
+                    retry_count = 0
+                    iteration_memory = []
                 else:
                     rollback_if_worse(rollback_hash, False)
                     print(f"⚠️ Task Failed Validation. Iteration {iteration + 1} took {elapsed:.1f}s — will retry.")
@@ -691,29 +885,43 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
 
     total_elapsed = time.time() - loop_start
     print(f"\n⏱ Total TDD loop time: {total_elapsed:.1f}s")
-    generate_run_summary(completed_tasks, failed_tasks, total_elapsed)
+    generate_run_summary(completed_tasks, failed_tasks, total_elapsed, last_coverage_output)
+
+    # E7: Wire webhook notification
+    summary_msg = f"🤖 TDD Pipeline: {len(completed_tasks)} completed, {len(failed_tasks)} failed in {total_elapsed:.1f}s"
+    send_webhook_notification(summary_msg)
 
 
-def generate_run_summary(completed: List[str], failed: List[str], total_elapsed: float) -> None:
-    """Generates a docs/run_summary.md report after each pipeline run (E3)."""
+def generate_run_summary(completed: List[str], failed: List[str], total_elapsed: float,
+                         last_test_output: str = "") -> None:
+    """Generates a docs/run_summary.md report after each pipeline run.
+
+    TF4: Reuses coverage stats from the last test run instead of re-running pytest.
+    """
     summary_path = "your_project/docs/run_summary.md"
     os.makedirs(os.path.dirname(summary_path), exist_ok=True)
 
-    # Try to read coverage and test stats from last pytest run
+    # TF4: Parse coverage and test stats from reused output instead of re-running
     coverage_pct = "N/A"
     test_pass_rate = "N/A"
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "your_project/", "--cov=your_project/", "--cov-report=term-missing", "-q"],
-            capture_output=True, text=True, timeout=60,
-        )
-        for line in result.stdout.split("\n"):
-            if "TOTAL" in line and "%" in line:
-                coverage_pct = line.split()[-1]
-            if "passed" in line:
-                test_pass_rate = line.strip()
-    except Exception:
-        pass
+    source = last_test_output if last_test_output else ""
+
+    if not source:
+        # Fallback: run pytest only if we don't have cached output
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", "your_project/", "--cov=your_project/", "--cov-report=term-missing", "-q"],
+                capture_output=True, text=True, timeout=60,
+            )
+            source = result.stdout
+        except Exception:
+            pass
+
+    for line in source.split("\n"):
+        if "TOTAL" in line and "%" in line:
+            coverage_pct = line.split()[-1]
+        if "passed" in line:
+            test_pass_rate = line.strip()
 
     from datetime import datetime
     run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

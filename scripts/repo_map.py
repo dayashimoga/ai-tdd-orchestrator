@@ -1,6 +1,8 @@
 import os
 import ast
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Tuple, Optional
 
 
 def _generate_python_map(file_path):
@@ -94,11 +96,40 @@ def _generate_js_ts_map(file_path):
     return "\n".join(lines) if lines else ""
 
 
+def _parse_file(file_path, file_name, rel_path,
+                supported_ast_ext, js_ts_ext, other_supported_ext):
+    """Parses a single file and returns (header, content) or None.
+
+    O3: Designed for use with ThreadPoolExecutor for parallel I/O.
+    """
+    if file_name.endswith(supported_ast_ext):
+        header = f"--- FILE: {rel_path} ---"
+        ast_outline = _generate_python_map(file_path)
+        content = ast_outline if ast_outline else "# No classes or functions defined."
+        return (header, content)
+    elif file_name.endswith(js_ts_ext):
+        header = f"--- FILE: {rel_path} ---"
+        js_outline = _generate_js_ts_map(file_path)
+        content = js_outline if js_outline else "# No functions or classes found."
+        return (header, content)
+    elif file_name.endswith(other_supported_ext):
+        header = f"--- FILE: {rel_path} ---"
+        content = "# Non-python file. Full contents omitted from map."
+        return (header, content)
+    return None
+
+
+# Threshold for switching to parallel parsing
+_PARALLEL_THRESHOLD = 10
+
+
 def generate_repo_map(target_dir="your_project"):
     """
     Crawls the target directory and creates a unified index of all files.
     Python files get AST parsed. JS/TS files get regex parsed (E9).
     Other code files get listed.
+
+    O3: Uses ThreadPoolExecutor for parallel file parsing in large repos.
     """
     if not os.path.exists(target_dir):
         return "Project directory is empty or does not exist."
@@ -106,8 +137,10 @@ def generate_repo_map(target_dir="your_project"):
     supported_ast_ext = (".py",)
     js_ts_ext = (".js", ".jsx", ".ts", ".tsx")
     other_supported_ext = (".go", ".html", ".css", ".md")
-    
-    repo_map = []
+    all_supported = supported_ast_ext + js_ts_ext + other_supported_ext
+
+    # Phase 1: Collect all files to parse
+    files_to_parse = []  # (file_path, file_name, rel_path)
     
     for root, _, files in os.walk(target_dir):
         # Skip hidden directories like .git or .pytest_cache
@@ -118,34 +151,55 @@ def generate_repo_map(target_dir="your_project"):
             continue
             
         for file in files:
-            file_path = os.path.join(root, file)
-            # Normalize for consistent display
-            rel_path = os.path.relpath(file_path, start=".")
-            
-            if file.endswith(supported_ast_ext):
-                repo_map.append(f"--- FILE: {rel_path} ---")
-                ast_outline = _generate_python_map(file_path)
-                if ast_outline:
-                    repo_map.append(ast_outline)
-                else:
-                    repo_map.append("# No classes or functions defined.")
-                repo_map.append("") # spacer
-            elif file.endswith(js_ts_ext):
-                repo_map.append(f"--- FILE: {rel_path} ---")
-                js_outline = _generate_js_ts_map(file_path)
-                if js_outline:
-                    repo_map.append(js_outline)
-                else:
-                    repo_map.append("# No functions or classes found.")
-                repo_map.append("") # spacer
-            elif file.endswith(other_supported_ext):
-                repo_map.append(f"--- FILE: {rel_path} ---")
-                repo_map.append("# Non-python file. Full contents omitted from map.")
-                repo_map.append("") # spacer
+            if file.endswith(all_supported):
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, start=".")
+                files_to_parse.append((file_path, file, rel_path))
 
-    if not repo_map:
+    if not files_to_parse:
         return "No supported code files found."
-        
+
+    # Phase 2: Parse files (parallel for large repos, sequential for small)
+    results = []  # (index, header, content)
+
+    if len(files_to_parse) >= _PARALLEL_THRESHOLD:
+        with ThreadPoolExecutor(max_workers=min(len(files_to_parse), 8)) as pool:
+            future_to_idx = {}
+            for idx, (fpath, fname, rpath) in enumerate(files_to_parse):
+                future = pool.submit(
+                    _parse_file, fpath, fname, rpath,
+                    supported_ast_ext, js_ts_ext, other_supported_ext
+                )
+                future_to_idx[future] = idx
+
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    result = future.result()
+                    if result:
+                        results.append((idx, result[0], result[1]))
+                except Exception:
+                    pass
+    else:
+        for idx, (fpath, fname, rpath) in enumerate(files_to_parse):
+            result = _parse_file(
+                fpath, fname, rpath,
+                supported_ast_ext, js_ts_ext, other_supported_ext
+            )
+            if result:
+                results.append((idx, result[0], result[1]))
+
+    if not results:
+        return "No supported code files found."
+
+    # Phase 3: Sort by original file order and assemble
+    results.sort(key=lambda x: x[0])
+    repo_map = []
+    for _, header, content in results:
+        repo_map.append(header)
+        repo_map.append(content)
+        repo_map.append("")  # spacer
+
     return "\n".join(repo_map)
 
 if __name__ == "__main__":

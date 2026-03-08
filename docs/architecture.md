@@ -1,118 +1,310 @@
 # Technical Architecture
 
 ## 1. System Overview
-The pipeline is designed to be highly modular. By migrating away from bulky Hugging Face `transformers` modules, the architecture separates the "Thinker" (the LLM server) from the "Orchestrator" (the CI scripts). The LLM Router (`scripts/llm_router.py`) abstracts all provider-specific APIs behind a single `generate()` call.
 
-## 2. Component Diagram
+The AI TDD Orchestrator is a fully autonomous code generation, testing, and remediation pipeline. It separates the **Thinker** (LLM server) from the **Orchestrator** (CI scripts), using a provider-agnostic `llm_router.py` that routes to Ollama, OpenAI, Anthropic, or Google Gemini behind a single `generate()` call.
+
+Key design principles:
+- **Zero-shot autonomy**: Generates task plans from natural language, writes code, runs tests, and fixes failures iteratively
+- **Provider agnostic**: Works with any LLM backend via environment variables
+- **TDD-first**: Every code change must pass `pytest --cov-fail-under=90` before being committed
+- **Self-healing**: Auto-rollback on regressions, progressive retry strategies, human-in-the-loop escalation
+
+---
+
+## 2. High-Level Component Diagram
+
 ```mermaid
 graph TD
-    A[GitHub Action / Local Docker] -->|1. Setup Target Repo| R[PyGithub / Git Clone]
-    R -->|2. Measures RAM/VRAM| B[select_model.py]
-    B -->|3. Detects GPU Platform| G[gpu_platform.py]
-    G -->|4. Parallel Health Check| C{LLM Endpoint}
-    A -->|5. Runs TDD Loop| D[ai_pipeline.py]
-    D -->|6. AST Repo Map| M[repo_map.py]
-    M -->|7. Python + JS/TS Maps| D
-    D -->|8. RAG Context| RAG[rag_engine.py]
-    RAG -->|9. Reference Docs| REF[docs/reference/]
-    D <-->|10. Binary Rollback| D
-    D -->|11. Routes to provider| LR[llm_router.py]
-    LR <-->|Ollama| C
-    LR <-->|OpenAI API| OAI[OpenAI]
-    LR <-->|Anthropic API| ANT[Anthropic]
-    LR <-->|Gemini API| GEM[Google Gemini]
-    D -->|12. Auto-detect Tests| T[pytest / jest / go test / cargo test]
-    T -->|13. Visual QA| V[visual_qa.py]
-    V <-->|14. VLM Assessment| C
-    D -->|15. Run Summary| RS[docs/run_summary.md]
-    D -->|16. Commits & Pushes| R
-    D -->|17. Posts Comments| F((GitHub PR API))
-    D -->|18. Webhook| WH[Slack / Discord]
-    I[GitHub Issue Opened] -->|19. Triggers| IR[issue-resolver.yml]
-    IR -->|20. Runs --issue| D
-    P[PR Comment @ai-hint] -->|21. Triggers| PC[pr-chat.yml]
-    PC -->|22. Runs --resume-with-hint| D
+    subgraph Entry Points
+        GHA["GitHub Action / Local Docker"]
+        ISS["GitHub Issue Opened"]
+        PRC["PR Comment @ai-hint"]
+    end
+
+    subgraph Hardware Intelligence
+        SM["select_model.py<br/>RAM/VRAM Detection"]
+        GP["gpu_platform.py<br/>Platform Auto-Detection"]
+    end
+
+    subgraph Core Pipeline
+        AP["ai_pipeline.py<br/>TDD Orchestrator"]
+        RM["repo_map.py<br/>AST Repo Mapper"]
+        RAG["rag_engine.py<br/>TF-IDF RAG Engine"]
+        VQA["visual_qa.py<br/>Visual QA"]
+    end
+
+    subgraph LLM Providers
+        LR["llm_router.py<br/>Provider Router"]
+        OLL["Ollama<br/>(Local/Cloud GPU)"]
+        OAI["OpenAI<br/>(GPT-4o)"]
+        ANT["Anthropic<br/>(Claude)"]
+        GEM["Google Gemini<br/>(gemini-1.5-flash)"]
+    end
+
+    subgraph External Services
+        GH["GitHub API<br/>(PyGithub)"]
+        WH["Webhook<br/>(Slack/Discord)"]
+        TF["Test Framework<br/>(pytest/jest/go/cargo)"]
+    end
+
+    GHA -->|"--manual / --issue"| AP
+    ISS -->|"issue-resolver.yml"| AP
+    PRC -->|"pr-chat.yml"| AP
+
+    SM -->|"Detects RAM/VRAM"| GP
+    GP -->|"Parallel Health Check"| OLL
+
+    AP -->|"Compressed AST Map"| RM
+    AP -->|"Reference Docs Context"| RAG
+    AP -->|"Code Generation"| LR
+    AP -->|"Visual Assessment"| VQA
+    AP -->|"Run Tests"| TF
+    AP -->|"Commit & Push"| GH
+    AP -->|"Notifications"| WH
+
+    LR -->|"Session Pooling"| OLL
+    LR -->|"Retry + Backoff"| OAI
+    LR -->|"Retry + Backoff"| ANT
+    LR -->|"Stream + Retry"| GEM
+
+    VQA -->|"VLM Assessment"| OLL
+
+    RAG -->|"Reads"| REF["docs/reference/"]
 ```
 
-## 3. Hardware Intelligence Layer
-Located in `scripts/select_model.py`.
-Standard LLMs require monolithic VRAM which causes Actions runners to crash. This layer intercepts the environment before Ollama boots, detects the `/proc/meminfo` or `sysctl`, and exports `OLLAMA_MODEL`. 
-- `qwen2.5-coder:32b` (>32GB Memory Envelope)
-- `deepseek-coder:6.7b` (>14GB Memory Envelope)
-- `qwen2.5-coder:3b` (<14GB standard runner envelope)
+---
 
-## 4. LLM Provider Router (`scripts/llm_router.py`)
-The pipeline is no longer locked to Ollama. A provider-agnostic router supports:
+## 3. TDD Loop Sequence Diagram
 
-| Provider | Env Vars | Streaming |
-|----------|----------|-----------|
-| Ollama (default) | `OLLAMA_URL`, `OLLAMA_MODEL` | ✅ Yes |
-| OpenAI (GPT-4o) | `LLM_PROVIDER=openai`, `OPENAI_API_KEY` | ✅ Yes |
-| Anthropic (Claude) | `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` | ❌ Batch |
-| Google Gemini | `LLM_PROVIDER=gemini`, `GOOGLE_API_KEY` | ❌ Batch |
+```mermaid
+sequenceDiagram
+    participant User as User / CI
+    participant AP as ai_pipeline.py
+    participant Planner as Planner Agent
+    participant Engineer as Engineer Agent
+    participant RM as repo_map.py
+    participant RAG as rag_engine.py
+    participant LR as llm_router.py
+    participant TF as Test Framework
+    participant Git as Git / GitHub
 
-Falls back to Ollama automatically if API keys are not set.
+    User->>AP: --manual / --issue / --resume-with-hint
+    AP->>Git: setup_target_repository()
+    AP->>Planner: generate_task_plan(prompt)
+    Planner->>LR: generate(plan_prompt)
+    LR-->>Planner: Markdown checklist
+    Planner-->>AP: project_tasks.md
 
-## 5. RAG Context Engine (`scripts/rag_engine.py`)
+    loop TDD Loop (max N iterations)
+        AP->>AP: Read next uncompleted task
+        AP->>Git: save_rollback_point()
+        AP->>RM: generate_repo_map()
+        RM-->>AP: Compressed AST map
+        AP->>RAG: get_rag_context(task)
+        RAG-->>AP: Relevant doc chunks
+        AP->>Engineer: execute_task(prompt + context)
+        Engineer->>LR: generate(engineer_prompt)
+        LR-->>Engineer: Code (FILE: delimited)
+        Engineer->>AP: parse_and_write_files()
+        AP->>TF: run_pytest_validation()
+
+        alt Tests Pass
+            AP->>AP: Mark task [x] complete
+            AP->>Git: Commit changes
+        else Tests Fail (retry)
+            AP->>AP: extract_test_failures()
+            AP->>Git: rollback_if_worse()
+            AP->>Engineer: Retry with error feedback
+            Note over AP,Engineer: Progressive strategy:<br/>Retry 1: concise errors<br/>Retry 2: + full test files<br/>Retry 3+: + conversation memory
+        end
+    end
+
+    AP->>AP: generate_run_summary()
+    AP->>Git: push_to_target_repository()
+    AP->>WH: send_webhook_notification()
+```
+
+---
+
+## 4. Issue Resolution Flow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub
+    participant IR as issue-resolver.yml
+    participant AP as ai_pipeline.py
+    participant PR as Pull Request
+
+    Dev->>GH: Opens Issue #42
+    GH->>IR: Trigger on issues: [opened]
+    IR->>AP: --issue (ISSUE_NUMBER, ISSUE_TITLE, ISSUE_BODY)
+    AP->>AP: Create branch fix-issue-42
+    AP->>AP: generate_task_plan() or update_task_plan()
+    AP->>AP: run_tdd_loop()
+
+    alt All Tasks Complete
+        AP->>GH: git push fix-issue-42
+        AP->>PR: create_pull(Resolves #42)
+        PR-->>Dev: Review AI-generated PR
+    else Stuck after max iterations
+        AP->>GH: post_help_comment()
+        GH-->>Dev: "AI needs help" comment
+        Dev->>GH: @ai-hint guidance
+        GH->>AP: --resume-with-hint
+    end
+```
+
+---
+
+## 5. Data Flow Diagram
+
+```mermaid
+flowchart LR
+    subgraph Inputs
+        PT["prompt.txt"]
+        RD["docs/reference/"]
+        ENV["Environment Variables"]
+    end
+
+    subgraph Processing
+        TP["Task Planner<br/>(LLM Call 1)"]
+        DC["Discovery<br/>(LLM Call 2)"]
+        ENG["Engineer<br/>(LLM Call 3)"]
+    end
+
+    subgraph Artifacts
+        TK["project_tasks.md"]
+        CODE["Generated Code"]
+        TEST["Generated Tests"]
+        SUM["run_summary.md"]
+    end
+
+    PT --> TP --> TK
+    TK --> DC
+    RD -->|"TF-IDF RAG"| ENG
+    DC -->|"File List"| ENG
+    ENG --> CODE
+    ENG --> TEST
+    CODE --> |"pytest/jest"| SUM
+```
+
+---
+
+## 6. Hardware Intelligence Layer
+
+Located in `scripts/select_model.py` and `scripts/gpu_platform.py`.
+
+### Model Selection Matrix
+
+| VRAM/RAM | Selected Model | Use Case |
+|----------|---------------|----------|
+| ≥24 GB VRAM | `qwen2.5-coder:32b` | Local workstation with high-end GPU |
+| ≥15 GB RAM | `qwen2.5-coder:7b` | Docker / mid-tier workstation |
+| <15 GB RAM | `qwen2.5-coder:3b` | GitHub Free Runner (7GB) |
+
+### Platform Detection
+- **Cross-platform RAM detection**: Linux (`/proc/meminfo`), macOS (`sysctl`), Windows (`wmic`)
+- **GPU VRAM**: `nvidia-smi` query
+- **Parallel health checks** via `ThreadPoolExecutor` (up to 10× faster than sequential)
+- **Failover chain**: Colab → Kaggle → Lightning → HuggingFace → SageMaker → Paperspace → Oracle → Vast.ai → RunPod → Custom → Local
+
+---
+
+## 7. LLM Provider Router (`scripts/llm_router.py`)
+
+| Provider | Env Vars | Streaming | Connection Pooling |
+|----------|----------|-----------|-------------------|
+| Ollama (default) | `OLLAMA_URL`, `OLLAMA_MODEL` | ✅ Yes | ✅ Session |
+| OpenAI (GPT-4o) | `LLM_PROVIDER=openai`, `OPENAI_API_KEY` | ✅ Yes | ✅ Session |
+| Anthropic (Claude) | `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` | ❌ Batch | ✅ Session |
+| Google Gemini | `LLM_PROVIDER=gemini`, `GOOGLE_API_KEY` | ✅ SSE | ✅ Session |
+
+**Optimizations:**
+- `requests.Session` singleton with connection pooling (4 connections, 10 max)
+- Exponential backoff retry (0.5s, 1s, 2s) on transient errors and 5xx responses
+- Falls back to Ollama automatically if API keys are not set
+
+---
+
+## 8. RAG Context Engine (`scripts/rag_engine.py`)
+
 Retrieval-Augmented Generation improves code quality for smaller models by injecting reference documents into prompts:
-1. **Indexing:** Scans `your_project/docs/reference/` for `.md`, `.txt`, `.json`, `.yaml`, `.py`, `.js`, `.ts` files.
-2. **Chunking:** Splits documents into ~500-char overlapping chunks.
-3. **Retrieval:** TF-IDF cosine similarity finds the top-5 most relevant chunks for each task.
-4. **Injection:** Relevant chunks are prepended to the engineer prompt as `--- REFERENCE DOCUMENTS (RAG) ---`.
-5. **Caching:** Directory hash prevents re-indexing unless files change.
+
+1. **Indexing:** Scans `your_project/docs/reference/` for `.md`, `.txt`, `.json`, `.yaml`, `.py`, `.js`, `.ts` files
+2. **Chunking:** Splits documents into ~500-char overlapping chunks
+3. **TF-IDF:** Proper term frequency × inverse document frequency weighting (not just TF)
+4. **Retrieval:** Cosine similarity finds the top-5 most relevant chunks for each task
+5. **Noise filtering:** Chunks below score threshold (0.01) are discarded
+6. **Injection:** Relevant chunks prepended to engineer prompt as `--- REFERENCE DOCUMENTS (RAG) ---`
+7. **Caching:** Directory hash prevents re-indexing unless files change
 
 Zero external dependencies — can be upgraded to ChromaDB or FAISS for larger document sets.
 
-## 6. Context Window Optimization (`scripts/repo_map.py`)
+---
+
+## 9. Context Window Optimization (`scripts/repo_map.py`)
+
 Prevents context window collapse on large projects:
-- **Python:** Parses using `ast` module to extract class definitions, function signatures, and docstrings.
-- **JS/TS:** Regex-based extraction of function declarations, arrow functions, class declarations, and method definitions.
-- **Other files:** Listed without content for structural awareness.
 
-The Engineer Agent receives this compressed map alongside the persistent `docs/requirements.md` and RAG context. A two-step discovery prompt asks the LLM which files it needs in full — reducing token usage by ~90%.
+- **Python:** `ast` module parses class definitions, function signatures, and docstrings
+- **JS/TS:** Regex extraction of function declarations, arrow functions, class declarations, method definitions
+- **Other files:** Listed without content for structural awareness
+- **Parallel I/O:** `ThreadPoolExecutor` for repos with ≥10 files (auto-detected threshold)
+- **Two-step discovery:** LLM selects which files to load in full — reducing token usage by ~90%
 
-## 7. Remediation Loop (`ai_pipeline.py`)
-1. **Repository Setup:** PyGithub creates a new remote repository or clones an existing one.
-2. **Persistent Tracking:** The system saves the initial prompt to `docs/requirements.md` and generates actionable steps in `project_tasks.md`. On re-runs, it appends new goals and dynamically updates the checklist without destroying completed tasks.
-3. **AST Repo Map:** Generates compressed codebase structure via `repo_map.py` (Python AST + JS/TS regex).
-4. **Two-Step Discovery:** Asks the LLM which files it needs before loading them. Results are cached across retry iterations.
-5. **RAG Context:** Retrieves relevant reference document chunks for prompt enrichment.
-6. **Streaming Generation:** Responses streamed via `iter_lines()` using list-join accumulation (O(n) instead of O(n²)).
-7. **Strict Regex Extraction:** Parses the AI output using Regex to cleanly strip conversational fluff and markdown ticks.
-8. **Elapsed Time Tracking:** Each iteration prints wall-clock time (e.g., `⏱ Iteration 2/5 completed in 47s`).
-9. **Auto-Detect Test Framework:** Automatically selects `pytest`, `jest`, `go test`, or `cargo test` based on project files.
-10. **Analysis Execution:** Runs test framework inside an automated feedback loop. If tests fail, the orchestrator reverts via `git reset` and feeds the stack trace back, repeating up to `MAX_TDD_ITERATIONS` (configurable via env var, default: 5).
-11. **Run Summary:** Auto-generates `docs/run_summary.md` with coverage, pass rate, completed/failed tasks, and elapsed time.
-12. **Writing & Pushing:** Writes generated files and pushes to `TARGET_REPO`. Skipped in `--dry-run` mode.
-13. **Webhook Notification:** Posts summary to Slack/Discord if `WEBHOOK_URL` is configured.
+---
 
-## 8. Autonomous Issue Resolution
-Workflow `issue-resolver.yml` triggers on `issues: [opened]`. It runs `ai_pipeline.py --issue` which:
+## 10. TDD Remediation Loop (`ai_pipeline.py`)
+
+1. **Repository Setup:** PyGithub creates/clones the target repository
+2. **Persistent Tracking:** Saves prompt to `docs/requirements.md`, generates `project_tasks.md` checklist
+3. **AST Repo Map:** Compressed codebase structure via `repo_map.py`
+4. **Two-Step Discovery:** Asks LLM which files to load. Results cached across retries
+5. **RAG Context:** TF-IDF retrieves relevant reference doc chunks
+6. **Streaming Generation:** Responses streamed via `iter_lines()` with list-join (O(n))
+7. **Strict Regex Extraction:** Compiled regex patterns extract code from LLM output
+8. **Pre-write Syntax Validation:** `ast.parse()` validates Python before disk write
+9. **Progressive Retry Strategy:**
+   - Retry 1: Concise error summary only
+   - Retry 2: + Full test file contents
+   - Retry 3+: + Conversation memory + "try completely different approach"
+10. **Auto-Detect Test Framework:** pytest / jest / go test / cargo test
+11. **Smart Error Extraction:** Pulls only assertion errors and key failures (not full tracebacks)
+12. **pytest --lf on retries:** Only re-runs failing tests for speed
+13. **Auto-Rollback:** `git reset --hard` if AI changes increase failures
+14. **Run Summary:** Auto-generates `docs/run_summary.md`
+15. **Webhook Notification:** Slack/Discord via `WEBHOOK_URL`
+
+---
+
+## 11. Visual Quality Assurance (`scripts/visual_qa.py`)
+
+Optionally screenshots generated HTML using Playwright (with Selenium fallback) and submits the image to an Ollama Vision model (e.g., `llava`) for aesthetic assessment. Scores: layout, color, typography, overall appeal.
+
+---
+
+## 12. Autonomous Issue Resolution
+
+Workflow `issue-resolver.yml` triggers on `issues: [opened]`:
 1. Reads issue title/body from environment
 2. Creates a `fix-issue-{id}` branch
-3. Checks for existing `project_tasks.md` — if found, uses `update_task_plan()` to preserve state; otherwise generates fresh
-4. Executes the TDD loop to fix the bug
-5. Automatically opens a Pull Request via PyGithub with `Resolves #{id}`
+3. Checks for existing `project_tasks.md` — preserves state or generates fresh
+4. Executes the TDD loop
+5. Opens a Pull Request via PyGithub with `Resolves #{id}`
 
-## 9. Human-in-the-Loop PR Chat
-When the TDD loop exhausts `max_iterations`, it posts a PR comment asking for help. Users reply with `@ai-hint <guidance>`. The `pr-chat.yml` workflow picks up the comment and runs `ai_pipeline.py --resume-with-hint`, injecting the user's hint into the Engineer's prompt.
+---
 
-## 10. Visual Quality Assurance (`scripts/visual_qa.py`)
-Optionally screenshots generated HTML using Playwright (with Selenium fallback) and submits the image to an Ollama Vision model (e.g., `llava`) for aesthetic assessment.
+## 13. Human-in-the-Loop PR Chat
 
-## 11. GPU Platform Intelligence (`scripts/gpu_platform.py`)
-- **Parallel Health Checks:** Uses `ThreadPoolExecutor` to ping all configured platforms simultaneously (up to 10× faster than sequential).
-- **Failover Chain:** Automatically tries configured platforms (Colab, Kaggle, etc.) in priority order.
-- **Cost Tracking:** `estimate_gpu_cost()` calculates estimated spend for paid platforms.
-- **Universal Routing:** Dynamically exports `OLLAMA_URL` at module startup.
+When the TDD loop exhausts `max_iterations`, it posts a PR comment asking for help. Users reply with `@ai-hint <guidance>`. The `pr-chat.yml` workflow runs `--resume-with-hint`, injecting the hint into the Engineer's prompt.
 
-## 12. Auto-Rollback & State Management
-- **Pre-emptive Checkpointing:** `save_rollback_point()` captures the git HEAD before any AI modification.
-- **Regression Detection:** `rollback_if_worse()` compares current test failures against the checkpoint. If failures increase, it executes a hard git reset.
+---
 
-## 13. Security Toolchain
-- **Python:** `bandit` - Scans AST for hardcoded credentials, eval(), injections.
-- **NodeJS:** `njsscan` - Scans Server-Side JavaScript logic.
-- **Go:** `gosec` - Abstract Syntax Tree security inspector for Golang.
-- **Sandboxing:** Path traversal protection via `safe_path()` using `os.path.realpath`.
-- **Secrets Masking:** All subprocess outputs are filtered through `mask_secret()` to prevent token leaks in CI logs.
+## 14. Security Toolchain
+
+- **Sandboxing:** Path traversal protection via `safe_path()` using `os.path.realpath`
+- **Secrets Masking:** All outputs filtered through `mask_secret()` to prevent token leaks in CI logs
+- **Git Timeout:** 120s timeout prevents infinite CI hangs
+- **Pre-write validation:** Python syntax checked before disk write

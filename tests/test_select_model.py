@@ -1,6 +1,7 @@
 import sys
 import os
 import unittest
+import platform
 from unittest.mock import patch, mock_open, MagicMock
 
 # Add project root to path so we can import from scripts
@@ -21,8 +22,29 @@ class TestSelectModel(unittest.TestCase):
 
     @patch('builtins.open', side_effect=Exception("No /proc/meminfo"))
     @patch('subprocess.check_output', side_effect=Exception("No sysctl"))
-    def test_get_total_memory_gb_fallback(self, mock_sub, mock_file):
+    @patch('platform.system', return_value="Linux")
+    def test_get_total_memory_gb_fallback(self, mock_platform, mock_sub, mock_file):
         # Fallback is 6.0
+        self.assertEqual(select_model.get_total_memory_gb(), 6.0)
+
+    @patch('builtins.open', side_effect=Exception("No /proc/meminfo"))
+    @patch('subprocess.check_output')
+    @patch('platform.system', return_value="Windows")
+    def test_get_total_memory_gb_windows(self, mock_platform, mock_sub, mock_file):
+        """E4: Test Windows RAM detection via wmic."""
+        # First call: sysctl fails, second call: wmic succeeds
+        mock_sub.side_effect = [
+            Exception("No sysctl"),
+            b'\r\nTotalPhysicalMemory=17179869184\r\n'
+        ]
+        result = select_model.get_total_memory_gb()
+        self.assertAlmostEqual(result, 16.0)
+
+    @patch('builtins.open', side_effect=Exception("No /proc/meminfo"))
+    @patch('subprocess.check_output', side_effect=Exception("All fail"))
+    @patch('platform.system', return_value="Windows")
+    def test_get_total_memory_gb_windows_fallback(self, mock_platform, mock_sub, mock_file):
+        """E4: Test Windows fallback when wmic also fails."""
         self.assertEqual(select_model.get_total_memory_gb(), 6.0)
 
     @patch('subprocess.check_output', return_value=b'8192\n8192\n')
@@ -53,6 +75,11 @@ class TestSelectModel(unittest.TestCase):
     @patch('scripts.select_model.get_gpu_vram_gb', return_value=0.0)
     def test_select_optimal_model_fallback(self, mock_gpu, mock_ram):
         self.assertEqual(select_model.select_optimal_model(), "qwen2.5-coder:3b")
+
+    @patch('scripts.select_model.get_total_memory_gb', return_value=32.0)
+    @patch('scripts.select_model.get_gpu_vram_gb', return_value=24.0)
+    def test_select_optimal_model_high_vram(self, mock_gpu, mock_ram):
+        self.assertEqual(select_model.select_optimal_model(), "qwen2.5-coder:32b")
 
     @patch('scripts.select_model.get_total_memory_gb', return_value=16.0)
     @patch('scripts.select_model.get_gpu_vram_gb', return_value=0.0)

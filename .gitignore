@@ -2,6 +2,8 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+ehthumbs.db
+ehthumbs_vista.db
 
 # Python
 __pycache__/
@@ -26,10 +28,13 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+*.pyo
 
 # Environment & Testing
 .env
-.venv
+.env.local
+.env.*.local
+.venv/
 venv/
 ENV/
 env.bak/
@@ -37,12 +42,22 @@ venv.bak/
 .test_venv/
 .pytest_cache/
 .coverage
+coverage.json
+coverage.xml
 htmlcov/
 cov.txt
 pytest_cov*.txt
 pytest_out*.txt
 out.txt
 *.log
+
+# Type checking & Linting
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.ruff_cache/
+.pyre/
 
 # C/C++ (Go binaries, local builds)
 *.o
@@ -58,6 +73,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+.pnpm-debug.log*
+package-lock.json
 
 # IDE/Editors
 .idea/
@@ -68,6 +85,24 @@ lerna-debug.log*
 .classpath
 .project
 .settings/
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# Jupyter/Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Docker artifacts
+*.pid
+docker-compose.override.yml
+
+# Temporary files
+*.bak
+*.tmp
+*.temp
+*.orig
+*.rej
 
 # Application Specific Generation Target
 your_project/
@@ -77,3 +112,7 @@ prompt_override.txt
 output.log
 pylint_report.txt
 complexity_report.txt
+
+# GPU Notebooks (output artifacts)
+gpu-notebooks/*.log
+gpu-notebooks/*.pid

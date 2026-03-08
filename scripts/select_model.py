@@ -19,6 +19,20 @@ def get_total_memory_gb():
         return int(out) / 1024 / 1024 / 1024
     except Exception:
         pass
+
+    try:
+        # Windows (E4: wmic fallback)
+        if platform.system() == "Windows":
+            out = subprocess.check_output(
+                ['wmic', 'ComputerSystem', 'get', 'TotalPhysicalMemory', '/value'],
+                stderr=subprocess.DEVNULL
+            ).decode('utf-8')
+            for line in out.strip().split('\n'):
+                if 'TotalPhysicalMemory' in line:
+                    val = line.split('=')[1].strip()
+                    return int(val) / 1024 / 1024 / 1024
+    except Exception:
+        pass
         
     # Assume minimal Free Tier limit if we can't detect
     return 6.0 

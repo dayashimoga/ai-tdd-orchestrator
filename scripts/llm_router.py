@@ -12,9 +12,78 @@ Configuration via environment variables:
 import json
 import os
 import sys
+import time
 from typing import Optional, List
 
 import requests
+
+# ---------------------------------------------------------------------------
+# Connection Pooling (O1) — Reuses TCP connections across LLM calls
+# ---------------------------------------------------------------------------
+_session: Optional[requests.Session] = None
+
+
+def _get_session() -> requests.Session:
+    """Returns a singleton requests.Session for connection pooling."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        # Configure connection pool size for parallel calls
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=4,
+            pool_maxsize=10,
+            max_retries=0,  # We handle retries ourselves
+        )
+        _session.mount("http://", adapter)
+        _session.mount("https://", adapter)
+    return _session
+
+
+# ---------------------------------------------------------------------------
+# Retry with Exponential Backoff (CG2)
+# ---------------------------------------------------------------------------
+MAX_RETRIES: int = 3
+BACKOFF_BASE: float = 0.5  # seconds
+
+
+def _retry_request(method: str, url: str, max_retries: int = MAX_RETRIES,
+                   **kwargs) -> requests.Response:
+    """Executes an HTTP request with exponential backoff on transient errors.
+
+    Retries on connection errors and 5xx server errors.
+    """
+    session = _get_session()
+    last_error: Optional[Exception] = None
+
+    for attempt in range(max_retries):
+        try:
+            if method == "POST":
+                response = session.post(url, **kwargs)
+            else:
+                response = session.get(url, **kwargs)
+
+            # Retry on server errors (5xx)
+            if response.status_code >= 500 and attempt < max_retries - 1:
+                delay = BACKOFF_BASE * (2 ** attempt)
+                print(f"⚠️ Server error {response.status_code}, retrying in {delay:.1f}s...")
+                time.sleep(delay)
+                continue
+
+            response.raise_for_status()
+            return response
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                delay = BACKOFF_BASE * (2 ** attempt)
+                print(f"⚠️ Connection error, retrying in {delay:.1f}s... ({e})")
+                time.sleep(delay)
+            else:
+                raise
+        except requests.exceptions.HTTPError:
+            raise  # Non-5xx HTTP errors should not be retried
+
+    raise last_error  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -33,8 +102,7 @@ def _ollama_generate(prompt: str, model: str, base_url: str,
         "stream": stream,
         "options": {"temperature": temperature, "num_ctx": num_ctx},
     }
-    response = requests.post(base_url, json=payload, timeout=300, stream=stream)
-    response.raise_for_status()
+    response = _retry_request("POST", base_url, json=payload, timeout=300, stream=stream)
 
     if stream:
         chunks: List[str] = []
@@ -54,6 +122,7 @@ def _ollama_generate(prompt: str, model: str, base_url: str,
 def _openai_generate(prompt: str, model: str, api_key: str,
                      temperature: float, stream: bool) -> str:
     """Generate via OpenAI Chat Completions API."""
+    session = _get_session()
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -64,11 +133,10 @@ def _openai_generate(prompt: str, model: str, api_key: str,
         "temperature": temperature,
         "stream": stream,
     }
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
+    response = _retry_request(
+        "POST", "https://api.openai.com/v1/chat/completions",
         headers=headers, json=payload, timeout=300, stream=stream,
     )
-    response.raise_for_status()
 
     if stream:
         chunks: List[str] = []
@@ -106,30 +174,56 @@ def _anthropic_generate(prompt: str, model: str, api_key: str,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
     }
-    response = requests.post(
-        "https://api.anthropic.com/v1/messages",
+    response = _retry_request(
+        "POST", "https://api.anthropic.com/v1/messages",
         headers=headers, json=payload, timeout=300,
     )
-    response.raise_for_status()
     blocks = response.json().get("content", [])
     return "".join(b.get("text", "") for b in blocks)
 
 
 def _gemini_generate(prompt: str, model: str, api_key: str,
-                     temperature: float) -> str:
-    """Generate via Google Gemini REST API."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                     temperature: float, stream: bool = False) -> str:
+    """Generate via Google Gemini REST API with optional streaming (E5)."""
+    if stream:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={api_key}&alt=sse"
+    else:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": temperature},
     }
-    response = requests.post(url, json=payload, timeout=300)
-    response.raise_for_status()
-    candidates = response.json().get("candidates", [])
-    if candidates:
-        parts = candidates[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts)
-    return ""
+    response = _retry_request("POST", url, json=payload, timeout=300, stream=stream)
+
+    if stream:
+        chunks: List[str] = []
+        for line in response.iter_lines():
+            if line:
+                line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+                if line_str.startswith("data: "):
+                    data = line_str[6:]
+                    try:
+                        chunk = json.loads(data)
+                        candidates = chunk.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            for p in parts:
+                                word = p.get("text", "")
+                                if word:
+                                    chunks.append(word)
+                                    sys.stdout.write(word)
+                                    sys.stdout.flush()
+                    except json.JSONDecodeError:
+                        continue
+        print()
+        return "".join(chunks)
+    else:
+        candidates = response.json().get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts)
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -174,12 +268,16 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
                 provider = "ollama"
             else:
                 print(f"🤖 [{provider.upper()}] model={model}")
-                return _gemini_generate(prompt, model, api_key, temperature)
+                return _gemini_generate(prompt, model, api_key, temperature, stream)
 
-        # Default: Ollama
-        from scripts.gpu_platform import select_platform
-        _, ollama_url = select_platform(use_failover=False)
-        ollama_url = os.getenv("OLLAMA_URL") or ollama_url
+        # Default: Ollama — use lazy platform detection (PS2)
+        ollama_url = os.getenv("OLLAMA_URL") or ""
+        if not ollama_url:
+            try:
+                from scripts.gpu_platform import select_platform
+                _, ollama_url = select_platform(use_failover=False)
+            except Exception:
+                ollama_url = "http://localhost:11434/api/generate"
         model = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
         print(f"🤖 [OLLAMA] model={model}")
         return _ollama_generate(prompt, model, ollama_url, temperature, num_ctx, stream)

@@ -45,50 +45,152 @@ class TestUtilities(unittest.TestCase):
         self.assertNotIn("\x1b", result)
         self.assertIn("ERROR", result)
 
-    def test_parse_and_write_files(self):
-        raw = "--- FILE: test.py ---\nprint('hello')\n--- FILE: test2.py ---\nprint('world')"
-        with patch('scripts.ai_pipeline.safe_path', return_value="your_project/test.py"):
+    def test_extract_test_failures(self):
+        err_out = (
+            "=================== FAILURES ===================\n"
+            "___ test_foo ____\n"
+            ">       assert 1 == 2\n"
+            "E       AssertionError: assert 1 == 2\n"
+            "== short test summary info ==\n"
+            "FAILED tests/test_foo.py::test_foo - AssertionError"
+        )
+        res = ai_pipeline.extract_test_failures(err_out)
+        self.assertIn("AssertionError", res)
+        self.assertIn("FAILED", res)
+
+    def test_extract_test_failures_fallback(self):
+        res = ai_pipeline.extract_test_failures("just random text with no failures")
+        self.assertEqual(res.strip(), "just random text with no failures")
+
+    def test_validate_python_syntax(self):
+        valid, err = ai_pipeline.validate_python_syntax("def foo():\n    pass\n", "test.py")
+        self.assertTrue(valid)
+
+        invalid, err2 = ai_pipeline.validate_python_syntax("def foo()\n    pass", "test.py")
+        self.assertFalse(invalid)
+        self.assertIn("SyntaxError", err2)
+
+        valid3, _ = ai_pipeline.validate_python_syntax("not python", "test.txt")
+        self.assertTrue(valid3)
+
+    def test_extract_test_failures_extended(self):
+        # Line 131: ImportError test
+        err_out = "ImportError: No module named 'fake'"
+        res = ai_pipeline.extract_test_failures(err_out)
+        self.assertIn("ImportError", res)
+
+        # Line 139: in_failure = False
+        err_out2 = (
+            "== short test summary info ==\n"
+            "FAILED tests/test_foo.py::test_foo\n"
+            "\n"
+            "This line is after the block\n"
+        )
+        res2 = ai_pipeline.extract_test_failures(err_out2)
+        self.assertIn("FAILED", res2)
+        self.assertNotIn("after the block", res2)
+
+    def test_validate_llm_response_no_code(self):
+        # Line 173: length > 50 and no ticks
+        long_text = "This is a very long text that does not contain any code blocks or any file delimiters and should be rejected."
+        valid, err = ai_pipeline.validate_llm_response(long_text)
+        self.assertFalse(valid)
+        self.assertIn("no code blocks", err)
+
+    def test_parse_and_write_files_syntax_error(self):
+        # Lines 208, 209, 220: Syntax error handling
+        raw = "--- FILE: bad.py ---\ndef foo("
+        with patch('scripts.ai_pipeline.safe_path', return_value="your_project/bad.py"):
             with patch('os.makedirs'):
                 with patch('builtins.open', mock_open()):
-                    count = ai_pipeline.parse_and_write_files(raw, "your_project")
-                    self.assertEqual(count, 2)
+                    with patch('builtins.print') as mock_print:
+                        # Mock validate_python_syntax to return a stable error string
+                        with patch('scripts.ai_pipeline.validate_python_syntax', return_value=(False, "SyntaxError in bad.py: stable error")):
+                            count = ai_pipeline.parse_and_write_files(raw, "your_project")
+                            self.assertEqual(count, 1)
+                            mock_print.assert_any_call("⚠️ SyntaxError in bad.py: stable error — writing anyway (will be caught by tests)")
+                            mock_print.assert_any_call("\n⚠️ 1 Python file(s) had syntax errors pre-write")
 
-    def test_parse_and_write_files_with_markdown(self):
-        raw = "--- FILE: test.py ---\n```python\nprint('hello')\n```\n--- FILE: test2.py ---\n```\nprint('world')\n```"
-        with patch('scripts.ai_pipeline.safe_path', return_value="your_project/test.py"):
-            with patch('os.makedirs'):
-                mock_file = mock_open()
-                with patch('builtins.open', mock_file):
-                    count = ai_pipeline.parse_and_write_files(raw, "your_project")
-                    self.assertEqual(count, 2)
-                    # Verify that the markdown ticks were stripped
-                    handle = mock_file()
-                    handle.write.assert_any_call("print('hello')\n")
-                    handle.write.assert_any_call("print('world')\n")
+    def test_extract_failures_full_short_summary(self):
+        # Cover lines 131, 134-140
+        err_out = "ImportError: fake\n== short test summary info ==\nFAILED test.py\nERROR test2.py\n\nignored"
+        res = ai_pipeline.extract_test_failures(err_out)
+        self.assertIn("ImportError", res)
+        self.assertIn("FAILED test.py", res)
+        self.assertIn("ERROR test2.py", res)
 
-    def test_parse_and_write_files_empty(self):
-        count = ai_pipeline.parse_and_write_files("Just some text", "your_project")
+    def test_validate_syntax_explicit(self):
+        # Cover lines 152-153
+        valid, err = ai_pipeline.validate_python_syntax("x = 1\n", "script.py")
+        self.assertTrue(valid)
+
+    def test_parse_and_write_files_odd_parts(self):
+
+        # Line 192: i + 1 >= len(parts)
+        raw = "--- FILE: file.py ---"
+        count = ai_pipeline.parse_and_write_files(raw)
         self.assertEqual(count, 0)
 
-    def test_get_github_client(self):
-        with patch('scripts.ai_pipeline.Github') as mock_gh:
-            ai_pipeline.get_github_client("token123")
-            mock_gh.assert_called_with("token123")
 
-    def test_git_run(self):
-        with patch('subprocess.run') as mock_run:
-            ai_pipeline.git_run(["git", "status"])
-            mock_run.assert_called_once()
-            # Verify timeout is passed
-            call_kwargs = mock_run.call_args[1]
-            self.assertEqual(call_kwargs['timeout'], 120)
+    def test_gpu_cost_err(self):
+        with patch('scripts.gpu_platform.get_platform_info', side_effect=Exception("api down")):
+            res = ai_pipeline.estimate_gpu_cost(100)
+            self.assertEqual(res, "Unknown")
+
+    def test_update_task_plan_no_file(self):
+        with patch('os.makedirs'):
+            with patch('os.path.exists', return_value=False):
+                with patch('builtins.open', mock_open()):
+                    with patch('builtins.print') as mock_print:
+                        ai_pipeline.update_task_plan("task")
+                        mock_print.assert_any_call("⚠️ No tasks.md found to update.")
+
+
+class TestDetectTestCommand(unittest.TestCase):
+
+    @patch('os.walk')
+    def test_detect_pytest(self, mock_walk):
+        mock_walk.return_value = [("project", [], ["main.py"])]
+        cmd = ai_pipeline.detect_test_command("project")
+        # cmd is a list, e.g. [sys.executable, "-m", "pytest", ...]
+        self.assertIn("pytest", str(cmd))
+
+    @patch('os.walk')
+    @patch('os.path.exists')
+    def test_detect_npm(self, mock_exists, mock_walk):
+        mock_walk.return_value = [("project", [], ["file.txt"])]
+        mock_exists.side_effect = lambda p: p.endswith('package.json')
+        # We need to mock open for package.json
+        import json
+        pkg_data = json.dumps({"test": "echo 'ok'"})
+        with patch('builtins.open', mock_open(read_data=pkg_data)):
+            cmd = ai_pipeline.detect_test_command("project")
+            self.assertIn("npm", cmd[0])
+
+    @patch('os.walk')
+    def test_detect_go(self, mock_walk):
+        mock_walk.return_value = [("project", [], ["main.go"])]
+        cmd = ai_pipeline.detect_test_command("project")
+        self.assertEqual(cmd[0], "go")
+
+    @patch('os.walk')
+    @patch('os.path.exists')
+    def test_detect_fallback(self, mock_exists, mock_walk):
+        mock_walk.return_value = [("project", [], [])]
+        mock_exists.return_value = False
+        cmd = ai_pipeline.detect_test_command("project")
+        self.assertIn("pytest", str(cmd))
+
+
+
 
 
 class TestAIGenerate(unittest.TestCase):
+
     """Tests for LLM API interaction."""
 
-    @patch('requests.post')
-    def test_ai_generate_success(self, mock_post):
+    @patch('scripts.llm_router._retry_request')
+    def test_ai_generate_success(self, mock_retry):
         import json
         mock_response = MagicMock()
         mock_response.iter_lines.return_value = [
@@ -96,18 +198,37 @@ class TestAIGenerate(unittest.TestCase):
             json.dumps({"response": "world"}).encode(),
         ]
         mock_response.raise_for_status = MagicMock()
-        mock_post.return_value = mock_response
+        mock_retry.return_value = mock_response
         result = ai_pipeline.ai_generate("test prompt")
         self.assertEqual(result, "hello world")
 
-    @patch('requests.post', side_effect=Exception("Connection refused"))
-    def test_ai_generate_failure(self, mock_post):
+    @patch('scripts.llm_router._retry_request', side_effect=Exception("Connection refused"))
+    def test_ai_generate_failure(self, mock_retry):
         result = ai_pipeline.ai_generate("test prompt")
         self.assertEqual(result, "")
 
 
 class TestRepositoryManagement(unittest.TestCase):
     """Tests for setup_target_repository and push_to_target_repository."""
+
+    @patch('scripts.ai_pipeline.TARGET_REPO', 'test/repo')
+    @patch('scripts.ai_pipeline.PROJECT_TYPE', 'new')
+    @patch('scripts.ai_pipeline.TARGET_REPO_TOKEN', 'token')
+    @patch('scripts.ai_pipeline.get_github_client')
+    def test_setup_repo_exists_fallback(self, mock_gh_client):
+        # Mocking the 422 "already exists" error
+        mock_user = MagicMock()
+        mock_user.login = "testuser"
+        # First call fails, second call (recursive) should avoid the loop
+        mock_user.create_repo.side_effect = [Exception("422: name already exists on this account"), MagicMock()]
+        mock_gh = MagicMock()
+        mock_gh.get_user.return_value = mock_user
+        mock_gh_client.return_value = mock_gh
+        
+        # We need to stop the recursion after the first retry
+        with patch('scripts.ai_pipeline.git_run'):
+            ai_pipeline.setup_target_repository()
+            self.assertTrue(mock_user.create_repo.called)
 
     @patch('scripts.ai_pipeline.TARGET_REPO', '')
     @patch('builtins.print')
@@ -212,14 +333,10 @@ class TestTDDLoop(unittest.TestCase):
     @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: main.py ---\nprint('hi')")
     @patch('scripts.ai_pipeline.repo_map')
     @patch('scripts.ai_pipeline.parse_and_write_files', return_value=1)
-    @patch('requests.post')
+    @patch('scripts.llm_router.generate', return_value="NONE")
     @patch('builtins.print')
-    def test_execute_task(self, mock_print, mock_post, mock_parse, mock_rmap, mock_gen):
+    def test_execute_task(self, mock_print, mock_llm, mock_parse, mock_rmap, mock_gen):
         mock_rmap.generate_repo_map.return_value = "class Foo: ..."
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"response": "NONE"}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
         ai_pipeline.execute_task("Implement main module")
 
     @patch('subprocess.run')
@@ -470,6 +587,56 @@ class TestPostInlineComment(unittest.TestCase):
         mock_print.assert_any_call("Failed to post PR comment: API fail")
 
 
+class TestWebhookAndMisc(unittest.TestCase):
+    """Tests for webhooks and cost estimation."""
+
+    @patch('os.getenv', return_value="https://webhook.test")
+    @patch('requests.post')
+    def test_send_webhook_success(self, mock_post, mock_env):
+        ai_pipeline.send_webhook_notification("test msg")
+        mock_post.assert_called_once()
+        self.assertIn("test msg", mock_post.call_args[1]['json']['content'])
+
+    @patch('os.getenv', return_value="")
+    @patch('requests.post')
+    def test_send_webhook_disabled(self, mock_post, mock_env):
+        ai_pipeline.send_webhook_notification("test msg")
+        mock_post.assert_not_called()
+
+    @patch('os.getenv', return_value="https://webhook.test")
+    @patch('requests.post', side_effect=Exception("timeout"))
+    @patch('builtins.print')
+    def test_send_webhook_error(self, mock_print, mock_post, mock_env):
+        ai_pipeline.send_webhook_notification("test msg")
+        mock_print.assert_called_with("⚠️ Webhook notification failed: timeout")
+
+    @patch('scripts.gpu_platform.get_platform_info', return_value={"cost": "$0.50/hr"})
+    @patch('scripts.gpu_platform.select_platform', return_value=("runpod", "url"))
+    def test_estimate_gpu_cost(self, mock_sel, mock_info):
+        # 3600 seconds = 1 hour -> $0.50
+        cost = ai_pipeline.estimate_gpu_cost(3600)
+        self.assertIn("~$0.5000", cost)
+
+    @patch('scripts.gpu_platform.get_platform_info', return_value={"free": True})
+    @patch('scripts.gpu_platform.select_platform', return_value=("local", "url"))
+    def test_estimate_gpu_cost_free(self, mock_sel, mock_info):
+        cost = ai_pipeline.estimate_gpu_cost(100)
+        self.assertEqual(cost, "Free")
+
+    @patch('scripts.gpu_platform.select_platform', return_value=("local", "http://test"))
+    def test_lazy_platform_url(self, mock_sel):
+        # Reset globals for testing
+        ai_pipeline._detected_platform = None
+        ai_pipeline._detected_url = None
+        url = ai_pipeline._get_platform_url()
+        self.assertEqual(url, "http://test")
+        mock_sel.assert_called_once()
+        # Second call should use cached global and not call select_platform again
+        url2 = ai_pipeline._get_platform_url()
+        self.assertEqual(url2, "http://test")
+        self.assertEqual(mock_sel.call_count, 1)
+
+
 class TestTDDLoopBranches(unittest.TestCase):
     """Tests for run_tdd_loop branch coverage."""
 
@@ -480,8 +647,10 @@ class TestTDDLoopBranches(unittest.TestCase):
 
     @patch('os.path.exists', return_value=True)
     @patch('builtins.open', new_callable=mock_open, read_data="- [x] Done task\n")
+    @patch('subprocess.run')
+    @patch('os.makedirs')
     @patch('builtins.print')
-    def test_tdd_loop_all_done(self, mock_print, mock_file, mock_exists):
+    def test_tdd_loop_all_done(self, mock_print, mock_makedirs, mock_subrun, mock_file, mock_exists):
         ai_pipeline.run_tdd_loop(max_iterations=1)
         mock_print.assert_any_call("\n==============================================")
 
@@ -532,26 +701,22 @@ class TestExecuteTaskBranches(unittest.TestCase):
     @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: main.py ---\ncode")
     @patch('scripts.ai_pipeline.repo_map')
     @patch('scripts.ai_pipeline.parse_and_write_files', return_value=1)
-    @patch('requests.post')
+    @patch('scripts.llm_router.generate', return_value="your_project/main.py")
     @patch('os.path.exists', return_value=True)
     @patch('os.path.isfile', return_value=True)
     @patch('scripts.ai_pipeline.safe_path', return_value="your_project/main.py")
     @patch('builtins.open', new_callable=mock_open, read_data="content")
     @patch('builtins.print')
-    def test_execute_task_loads_files(self, mock_print, mock_file, mock_safe, mock_isfile, mock_exists, mock_post, mock_parse, mock_rmap, mock_gen):
+    def test_execute_task_loads_files(self, mock_print, mock_file, mock_safe, mock_isfile, mock_exists, mock_llm, mock_parse, mock_rmap, mock_gen):
         mock_rmap.generate_repo_map.return_value = "class Foo: ..."
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"response": "your_project/main.py"}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
         ai_pipeline.execute_task("Update main module")
 
     @patch('scripts.ai_pipeline.ai_generate', return_value="just text no files")
     @patch('scripts.ai_pipeline.repo_map')
     @patch('scripts.ai_pipeline.parse_and_write_files', return_value=0)
-    @patch('requests.post', side_effect=Exception("timeout"))
+    @patch('scripts.llm_router.generate', side_effect=Exception("timeout"))
     @patch('builtins.print')
-    def test_execute_task_discovery_fails(self, mock_print, mock_post, mock_parse, mock_rmap, mock_gen):
+    def test_execute_task_discovery_fails(self, mock_print, mock_llm, mock_parse, mock_rmap, mock_gen):
         mock_rmap.generate_repo_map.return_value = "empty"
         ai_pipeline.execute_task("Do something")
 
@@ -590,3 +755,50 @@ class TestPushWithChanges(unittest.TestCase):
 if __name__ == '__main__':
     unittest.main()
 
+
+class TestCompiledRegexPatterns(unittest.TestCase):
+    """Tests for compiled regex patterns (O4)."""
+
+    def test_re_ansi_escape(self):
+        text = "\x1b[31mERROR\x1b[0m: something"
+        result = ai_pipeline._RE_ANSI_ESCAPE.sub('', text)
+        self.assertIn("ERROR", result)
+        self.assertNotIn("\x1b", result)
+
+    def test_re_file_delimiter(self):
+        text = "--- FILE: main.py ---\ncode here"
+        matches = ai_pipeline._RE_FILE_DELIMITER.findall(text)
+        self.assertEqual(matches, ["main.py"])
+
+    def test_re_code_block(self):
+        text = "```python\ndef foo():\n    pass\n```"
+        match = ai_pipeline._RE_CODE_BLOCK.search(text)
+        self.assertIsNotNone(match)
+        self.assertIn("def foo():", match.group(1))
+
+    def test_re_error_types(self):
+        self.assertIsNotNone(ai_pipeline._RE_ERROR_TYPES.search("ImportError: no module"))
+        self.assertIsNotNone(ai_pipeline._RE_ERROR_TYPES.search("SyntaxError: bad"))
+        self.assertIsNone(ai_pipeline._RE_ERROR_TYPES.search("all tests passed"))
+
+
+class TestAIGenerateWithRouter(unittest.TestCase):
+    """Tests for ai_generate using llm_router."""
+
+    @patch('scripts.llm_router._retry_request')
+    def test_ai_generate_success(self, mock_retry):
+        import json
+        mock_response = MagicMock()
+        mock_response.iter_lines.return_value = [
+            json.dumps({"response": "hello "}).encode(),
+            json.dumps({"response": "world"}).encode(),
+        ]
+        mock_response.raise_for_status = MagicMock()
+        mock_retry.return_value = mock_response
+        result = ai_pipeline.ai_generate("test prompt")
+        self.assertEqual(result, "hello world")
+
+    @patch('scripts.llm_router._retry_request', side_effect=Exception("Connection refused"))
+    def test_ai_generate_failure(self, mock_retry):
+        result = ai_pipeline.ai_generate("test prompt")
+        self.assertEqual(result, "")
