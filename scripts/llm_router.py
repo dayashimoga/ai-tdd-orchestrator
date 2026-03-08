@@ -111,7 +111,18 @@ PROVIDER_CONFIG = {
 }
 
 # Errors that trigger automatic failover (don't retry, move to next provider)
-FAILOVER_STATUS_CODES = {429, 503, 529}  # Rate-limited, Overloaded, Overloaded
+FAILOVER_STATUS_CODES = {
+    401,  # Unauthorized (Invalid API Key)
+    403,  # Forbidden (Blocked or no access)
+    404,  # Not Found (Invalid model name or endpoint)
+    413,  # Payload Too Large (Prompt exceeds context window)
+    429,  # Rate-limited
+    500,  # Internal Server Error
+    502,  # Bad Gateway
+    503,  # Overloaded
+    504,  # Gateway Timeout
+    529,  # Overloaded (Anthropic-specific)
+}
 
 
 def _ollama_generate(prompt: str, model: str, base_url: str,
