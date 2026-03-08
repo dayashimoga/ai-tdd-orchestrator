@@ -1,9 +1,10 @@
-"""LLM Provider Router — Provider-agnostic LLM interface.
+"""LLM Provider Router — Provider-agnostic LLM interface with auto-failover.
 
 Supports: Ollama (default), OpenAI, Anthropic, Google Gemini, Groq, Cerebras.
 
 Configuration via environment variables:
-    LLM_PROVIDER: "ollama" | "openai" | "anthropic" | "gemini" | "groq" | "cerebras"  (default: "ollama")
+    LLM_PROVIDER: "auto" | "ollama" | "openai" | "anthropic" | "gemini" | "groq" | "cerebras"  (default: "auto")
+    When set to "auto", selects the best free provider with automatic failover.
     OLLAMA_URL / OLLAMA_MODEL: for Ollama
     OPENAI_API_KEY / OPENAI_MODEL: for OpenAI (default model: gpt-4o-mini)
     ANTHROPIC_API_KEY / ANTHROPIC_MODEL: for Anthropic (default model: claude-3-haiku-20240307)
@@ -92,7 +93,25 @@ def _retry_request(method: str, url: str, max_retries: int = MAX_RETRIES,
 # Provider Registry
 # ---------------------------------------------------------------------------
 
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "auto").lower()
+
+# ---------------------------------------------------------------------------
+# Provider Failover Chain — tried in order when LLM_PROVIDER="auto"
+# ---------------------------------------------------------------------------
+# Free API providers first (no GPU needed), then Ollama (local/cloud GPU)
+PROVIDER_FAILOVER_CHAIN = ["groq", "cerebras", "gemini", "openai", "anthropic", "ollama"]
+
+# Map provider → (env_key_for_api_key, env_key_for_model, default_model, generate_fn_name)
+PROVIDER_CONFIG = {
+    "groq":      ("GROQ_API_KEY",      "GROQ_MODEL",      "llama-3.3-70b-versatile"),
+    "cerebras":  ("CEREBRAS_API_KEY",   "CEREBRAS_MODEL",  "llama3.1-70b"),
+    "openai":    ("OPENAI_API_KEY",     "OPENAI_MODEL",    "gpt-4o-mini"),
+    "anthropic": ("ANTHROPIC_API_KEY",  "ANTHROPIC_MODEL", "claude-3-haiku-20240307"),
+    "gemini":    ("GOOGLE_API_KEY",     "GOOGLE_MODEL",    "gemini-1.5-flash"),
+}
+
+# Errors that trigger automatic failover (don't retry, move to next provider)
+FAILOVER_STATUS_CODES = {429, 503, 529}  # Rate-limited, Overloaded, Overloaded
 
 
 def _ollama_generate(prompt: str, model: str, base_url: str,
@@ -262,67 +281,50 @@ def _gemini_generate(prompt: str, model: str, api_key: str,
 # Public API
 # ---------------------------------------------------------------------------
 
-def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
-             num_ctx: int = 8192) -> str:
-    """Provider-agnostic LLM generation.
+def _call_provider(provider: str, prompt: str, temperature: float,
+                   stream: bool, num_ctx: int) -> str:
+    """Call a single provider. Raises on error (for failover to catch)."""
+    if provider == "groq":
+        api_key = os.getenv("GROQ_API_KEY", "")
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY not set")
+        print(f"\U0001f916 [GROQ] model={model} (~500 tok/s)")
+        return _groq_generate(prompt, model, api_key, temperature, stream)
 
-    Routes to the correct backend based on LLM_PROVIDER env var.
-    Falls back to Ollama if no provider is configured.
-    """
-    provider = LLM_PROVIDER
+    elif provider == "cerebras":
+        api_key = os.getenv("CEREBRAS_API_KEY", "")
+        model = os.getenv("CEREBRAS_MODEL", "llama3.1-70b")
+        if not api_key:
+            raise ValueError("CEREBRAS_API_KEY not set")
+        print(f"\U0001f916 [CEREBRAS] model={model} (~2000 tok/s)")
+        return _cerebras_generate(prompt, model, api_key, temperature, stream)
 
-    try:
-        if provider == "openai":
-            api_key = os.getenv("OPENAI_API_KEY", "")
-            model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-            if not api_key:
-                print("❌ OPENAI_API_KEY not set. Falling back to Ollama.")
-                provider = "ollama"
-            else:
-                print(f"🤖 [{provider.upper()}] model={model}")
-                return _openai_generate(prompt, model, api_key, temperature, stream)
+    elif provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not set")
+        print(f"\U0001f916 [OPENAI] model={model}")
+        return _openai_generate(prompt, model, api_key, temperature, stream)
 
-        if provider == "anthropic":
-            api_key = os.getenv("ANTHROPIC_API_KEY", "")
-            model = os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
-            if not api_key:
-                print("❌ ANTHROPIC_API_KEY not set. Falling back to Ollama.")
-                provider = "ollama"
-            else:
-                print(f"🤖 [{provider.upper()}] model={model}")
-                return _anthropic_generate(prompt, model, api_key, temperature)
+    elif provider == "anthropic":
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        model = os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set")
+        print(f"\U0001f916 [ANTHROPIC] model={model}")
+        return _anthropic_generate(prompt, model, api_key, temperature)
 
-        if provider == "gemini":
-            api_key = os.getenv("GOOGLE_API_KEY", "")
-            model = os.getenv("GOOGLE_MODEL", "gemini-1.5-flash")
-            if not api_key:
-                print("❌ GOOGLE_API_KEY not set. Falling back to Ollama.")
-                provider = "ollama"
-            else:
-                print(f"🤖 [{provider.upper()}] model={model}")
-                return _gemini_generate(prompt, model, api_key, temperature, stream)
+    elif provider == "gemini":
+        api_key = os.getenv("GOOGLE_API_KEY", "")
+        model = os.getenv("GOOGLE_MODEL", "gemini-1.5-flash")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY not set")
+        print(f"\U0001f916 [GEMINI] model={model}")
+        return _gemini_generate(prompt, model, api_key, temperature, stream)
 
-        if provider == "groq":
-            api_key = os.getenv("GROQ_API_KEY", "")
-            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-            if not api_key:
-                print("❌ GROQ_API_KEY not set. Falling back to Ollama.")
-                provider = "ollama"
-            else:
-                print(f"🤖 [{provider.upper()}] model={model} (~500 tok/s)")
-                return _groq_generate(prompt, model, api_key, temperature, stream)
-
-        if provider == "cerebras":
-            api_key = os.getenv("CEREBRAS_API_KEY", "")
-            model = os.getenv("CEREBRAS_MODEL", "llama3.1-70b")
-            if not api_key:
-                print("❌ CEREBRAS_API_KEY not set. Falling back to Ollama.")
-                provider = "ollama"
-            else:
-                print(f"🤖 [{provider.upper()}] model={model} (~2000 tok/s)")
-                return _cerebras_generate(prompt, model, api_key, temperature, stream)
-
-        # Default: Ollama — use lazy platform detection (PS2)
+    else:  # ollama
         ollama_url = os.getenv("OLLAMA_URL") or ""
         if not ollama_url:
             try:
@@ -331,12 +333,91 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
             except Exception:
                 ollama_url = "http://localhost:11434/api/generate"
         model = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
-        print(f"🤖 [OLLAMA] model={model}")
+        print(f"\U0001f916 [OLLAMA] model={model}")
         return _ollama_generate(prompt, model, ollama_url, temperature, num_ctx, stream)
 
-    except Exception as e:
-        print(f"\n❌ LLM generation error ({provider}): {e}")
-        return ""
+
+def _is_failover_error(error: Exception) -> bool:
+    """Check if an error should trigger automatic failover to the next provider."""
+    if isinstance(error, requests.exceptions.HTTPError):
+        if hasattr(error, 'response') and error.response is not None:
+            return error.response.status_code in FAILOVER_STATUS_CODES
+    if isinstance(error, (requests.exceptions.ConnectionError,
+                          requests.exceptions.Timeout)):
+        return True
+    # Check for rate-limit messages in error text
+    err_str = str(error).lower()
+    return any(kw in err_str for kw in ["rate limit", "quota", "429", "503",
+                                         "overloaded", "capacity"])
+
+
+def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
+             num_ctx: int = 8192) -> str:
+    """Provider-agnostic LLM generation with automatic failover.
+
+    When LLM_PROVIDER="auto" (default):
+      1. Detects available providers (checks which API keys are set)
+      2. Tries them in priority order: groq → cerebras → gemini → openai → anthropic → ollama
+      3. On rate-limit (429), timeout, or overload (503), auto-fails to the next provider
+
+    When LLM_PROVIDER is set to a specific provider:
+      1. Tries that provider first
+      2. If it hits a rate limit or error, fails over through remaining providers
+    """
+    provider = LLM_PROVIDER
+
+    # Build the failover chain
+    if provider == "auto":
+        chain = list(PROVIDER_FAILOVER_CHAIN)  # groq → cerebras → ... → ollama
+    elif provider == "ollama":
+        chain = ["ollama"]  # No failover for explicit Ollama
+    else:
+        # Start with the chosen provider, then failover through the rest
+        chain = [provider] + [p for p in PROVIDER_FAILOVER_CHAIN if p != provider]
+
+    last_error = None
+    for i, prov in enumerate(chain):
+        try:
+            return _call_provider(prov, prompt, temperature, stream, num_ctx)
+        except ValueError:
+            # API key not set — skip silently
+            continue
+        except requests.exceptions.HTTPError as e:
+            last_error = e
+            if _is_failover_error(e) and i < len(chain) - 1:
+                next_prov = chain[i + 1] if i + 1 < len(chain) else "ollama"
+                status = e.response.status_code if e.response is not None else "unknown"
+                print(f"\n\u26a0\ufe0f {prov.upper()} returned {status}. "
+                      f"Failing over to {next_prov.upper()}...")
+                continue
+            else:
+                print(f"\n\u274c LLM error ({prov}): {e}")
+                return ""
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            last_error = e
+            if i < len(chain) - 1:
+                next_prov = chain[i + 1]
+                print(f"\n\u26a0\ufe0f {prov.upper()} unreachable. "
+                      f"Failing over to {next_prov.upper()}...")
+                continue
+            else:
+                print(f"\n\u274c All providers failed. Last error ({prov}): {e}")
+                return ""
+        except Exception as e:
+            last_error = e
+            if _is_failover_error(e) and i < len(chain) - 1:
+                next_prov = chain[i + 1]
+                print(f"\n\u26a0\ufe0f {prov.upper()} error: {e}. "
+                      f"Failing over to {next_prov.upper()}...")
+                continue
+            else:
+                print(f"\n\u274c LLM generation error ({prov}): {e}")
+                return ""
+
+    # All providers exhausted
+    print(f"\n\u274c All LLM providers exhausted. Last error: {last_error}")
+    return ""
 
 
 def get_provider_info() -> str:

@@ -8,8 +8,10 @@ import requests
 from scripts.llm_router import (
     _ollama_generate, _openai_generate, _anthropic_generate,
     _gemini_generate, _groq_generate, _cerebras_generate,
-    _openai_compatible_generate, generate, get_provider_info,
+    _openai_compatible_generate, _call_provider, _is_failover_error,
+    generate, get_provider_info,
     _get_session, _retry_request,
+    PROVIDER_FAILOVER_CHAIN, FAILOVER_STATUS_CODES,
 )
 import scripts.llm_router as llm_router
 
@@ -384,7 +386,7 @@ class TestGetProviderInfo:
         llm_router.LLM_PROVIDER = "cerebras"
         info = llm_router.get_provider_info()
         assert "Cerebras" in info
-        llm_router.LLM_PROVIDER = "ollama"
+        llm_router.LLM_PROVIDER = "auto"
 
 
 class TestGenerateGroqCerebras:
@@ -399,7 +401,7 @@ class TestGenerateGroqCerebras:
         llm_router.LLM_PROVIDER = "groq"
         result = llm_router.generate("test", stream=False)
         assert result == "Groq via router"
-        llm_router.LLM_PROVIDER = "ollama"
+        llm_router.LLM_PROVIDER = "auto"
 
     @patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False)
     @patch("scripts.llm_router._retry_request")
@@ -410,7 +412,7 @@ class TestGenerateGroqCerebras:
         llm_router.LLM_PROVIDER = "groq"
         result = llm_router.generate("test", stream=True)
         assert result == "Ollama"
-        llm_router.LLM_PROVIDER = "ollama"
+        llm_router.LLM_PROVIDER = "auto"
 
     @patch.dict(os.environ, {"CEREBRAS_API_KEY": "csk_test"}, clear=False)
     @patch("scripts.llm_router._retry_request")
@@ -423,7 +425,7 @@ class TestGenerateGroqCerebras:
         llm_router.LLM_PROVIDER = "cerebras"
         result = llm_router.generate("test", stream=False)
         assert result == "Cerebras via router"
-        llm_router.LLM_PROVIDER = "ollama"
+        llm_router.LLM_PROVIDER = "auto"
 
     @patch.dict(os.environ, {"CEREBRAS_API_KEY": ""}, clear=False)
     @patch("scripts.llm_router._retry_request")
@@ -434,4 +436,129 @@ class TestGenerateGroqCerebras:
         llm_router.LLM_PROVIDER = "cerebras"
         result = llm_router.generate("test", stream=True)
         assert result == "Ollama"
-        llm_router.LLM_PROVIDER = "ollama"
+        llm_router.LLM_PROVIDER = "auto"
+
+
+class TestAutoFailover:
+    """Tests for automatic provider failover on rate limits and errors."""
+
+    def test_is_failover_error_429(self):
+        resp = MagicMock()
+        resp.status_code = 429
+        err = requests.exceptions.HTTPError(response=resp)
+        assert _is_failover_error(err) is True
+
+    def test_is_failover_error_503(self):
+        resp = MagicMock()
+        resp.status_code = 503
+        err = requests.exceptions.HTTPError(response=resp)
+        assert _is_failover_error(err) is True
+
+    def test_is_failover_error_400_not_failover(self):
+        resp = MagicMock()
+        resp.status_code = 400
+        err = requests.exceptions.HTTPError(response=resp)
+        assert _is_failover_error(err) is False
+
+    def test_is_failover_error_connection(self):
+        err = requests.exceptions.ConnectionError("refused")
+        assert _is_failover_error(err) is True
+
+    def test_is_failover_error_timeout(self):
+        err = requests.exceptions.Timeout("timed out")
+        assert _is_failover_error(err) is True
+
+    def test_is_failover_error_rate_limit_text(self):
+        err = Exception("rate limit exceeded")
+        assert _is_failover_error(err) is True
+
+    def test_is_failover_error_generic(self):
+        err = Exception("something else entirely")
+        assert _is_failover_error(err) is False
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test", "CEREBRAS_API_KEY": "csk_test"}, clear=False)
+    @patch("scripts.llm_router._groq_generate")
+    @patch("scripts.llm_router._cerebras_generate")
+    def test_auto_failover_groq_429_to_cerebras(self, mock_cerebras, mock_groq):
+        """When Groq returns 429, should automatically try Cerebras."""
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        mock_groq.side_effect = requests.exceptions.HTTPError(response=resp_429)
+        mock_cerebras.return_value = "Cerebras saved the day"
+
+        llm_router.LLM_PROVIDER = "auto"
+        result = llm_router.generate("test", stream=False)
+        assert result == "Cerebras saved the day"
+        assert mock_groq.called
+        assert mock_cerebras.called
+        llm_router.LLM_PROVIDER = "auto"
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test", "CEREBRAS_API_KEY": "csk_test"}, clear=False)
+    @patch("scripts.llm_router._groq_generate")
+    @patch("scripts.llm_router._cerebras_generate")
+    def test_auto_failover_groq_timeout_to_cerebras(self, mock_cerebras, mock_groq):
+        """When Groq times out, should automatically try Cerebras."""
+        mock_groq.side_effect = requests.exceptions.Timeout("timeout")
+        mock_cerebras.return_value = "Cerebras fallback"
+
+        llm_router.LLM_PROVIDER = "auto"
+        result = llm_router.generate("test", stream=False)
+        assert result == "Cerebras fallback"
+        llm_router.LLM_PROVIDER = "auto"
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "", "CEREBRAS_API_KEY": ""}, clear=False)
+    @patch("scripts.llm_router._retry_request")
+    def test_auto_mode_skips_unconfigured_falls_to_ollama(self, mock_retry):
+        """Auto mode skips providers without API keys, falls to Ollama."""
+        mock_resp = MagicMock()
+        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama auto"}).encode()]
+        mock_retry.return_value = mock_resp
+
+        llm_router.LLM_PROVIDER = "auto"
+        result = llm_router.generate("test", stream=True)
+        assert result == "Ollama auto"
+        llm_router.LLM_PROVIDER = "auto"
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}, clear=False)
+    @patch("scripts.llm_router._groq_generate")
+    def test_explicit_provider_no_chain_on_non_failover_error(self, mock_groq):
+        """Non-failover errors (400) should NOT trigger failover."""
+        resp_400 = MagicMock()
+        resp_400.status_code = 400
+        mock_groq.side_effect = requests.exceptions.HTTPError(response=resp_400)
+
+        llm_router.LLM_PROVIDER = "groq"
+        result = llm_router.generate("test", stream=False)
+        assert result == ""
+        llm_router.LLM_PROVIDER = "auto"
+
+    def test_failover_chain_order(self):
+        """Verify the failover chain order is correct."""
+        assert PROVIDER_FAILOVER_CHAIN[0] == "groq"
+        assert PROVIDER_FAILOVER_CHAIN[1] == "cerebras"
+        assert PROVIDER_FAILOVER_CHAIN[-1] == "ollama"
+
+    def test_failover_status_codes(self):
+        """Verify failover triggers on expected status codes."""
+        assert 429 in FAILOVER_STATUS_CODES  # Rate limit
+        assert 503 in FAILOVER_STATUS_CODES  # Overloaded
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}, clear=False)
+    @patch("scripts.llm_router._groq_generate")
+    def test_call_provider_groq(self, mock_groq):
+        mock_groq.return_value = "groq result"
+        result = _call_provider("groq", "test", 0.2, False, 8192)
+        assert result == "groq result"
+
+    def test_call_provider_missing_key_raises(self):
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError):
+                _call_provider("groq", "test", 0.2, False, 8192)
+
+    @patch("scripts.llm_router._retry_request")
+    def test_call_provider_ollama(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ollama result"}
+        mock_retry.return_value = mock_resp
+        result = _call_provider("ollama", "test", 0.2, False, 8192)
+        assert result == "ollama result"
