@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-The AI TDD Orchestrator is a fully autonomous code generation, testing, and remediation pipeline. It separates the **Thinker** (LLM server) from the **Orchestrator** (CI scripts), using a provider-agnostic `llm_router.py` that routes to Ollama, OpenAI, Anthropic, or Google Gemini behind a single `generate()` call.
+The AI TDD Orchestrator is a fully autonomous code generation, testing, and remediation pipeline. It separates the **Thinker** (LLM server) from the **Orchestrator** (CI scripts), using a provider-agnostic `llm_router.py` that routes to Ollama, OpenAI, Anthropic, Google Gemini, Groq, or Cerebras behind a single `generate()` call.
 
 Key design principles:
 - **Zero-shot autonomy**: Generates task plans from natural language, writes code, runs tests, and fixes failures iteratively
@@ -40,6 +40,8 @@ graph TD
         OAI["OpenAI<br/>(GPT-4o)"]
         ANT["Anthropic<br/>(Claude)"]
         GEM["Google Gemini<br/>(gemini-1.5-flash)"]
+        GRQ["Groq<br/>(Llama 70B, ~500 tok/s)"]
+        CER["Cerebras<br/>(Llama 70B, ~2000 tok/s)"]
     end
 
     subgraph External Services
@@ -67,6 +69,8 @@ graph TD
     LR -->|"Retry + Backoff"| OAI
     LR -->|"Retry + Backoff"| ANT
     LR -->|"Stream + Retry"| GEM
+    LR -->|"~500 tok/s Free"| GRQ
+    LR -->|"~2000 tok/s Free"| CER
 
     VQA -->|"VLM Assessment"| OLL
 
