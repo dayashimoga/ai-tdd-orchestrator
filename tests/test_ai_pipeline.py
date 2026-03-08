@@ -941,3 +941,40 @@ class TestGitRun(unittest.TestCase):
         ai_pipeline.git_run(["git", "status"])
         _, kwargs = mock_run.call_args
         self.assertEqual(kwargs["timeout"], ai_pipeline.GIT_TIMEOUT)
+
+
+class TestSanitizeGeneratedCode(unittest.TestCase):
+    """Tests for the _sanitize_generated_code function."""
+
+    def test_strips_conversational_prose(self):
+        code = (
+            "def hello():\n"
+            "    return 'world'\n"
+            "This setup provides a basic structure for a project with tasks and a main entry point and tests\n"
+        )
+        result = ai_pipeline._sanitize_generated_code(code, "app.py")
+        self.assertNotIn("This setup provides", result)
+        self.assertIn("def hello():", result)
+
+    def test_fixes_your_project_imports(self):
+        code = "from your_project.app import app\nimport your_project.models\n"
+        result = ai_pipeline._sanitize_generated_code(code, "tests/test_app.py")
+        self.assertIn("from app import app", result)
+        self.assertIn("import models", result)
+        self.assertNotIn("your_project.", result)
+
+    def test_preserves_comments(self):
+        code = "# This is a really really long comment that describes what this module does in great detail for documentation\ndef foo():\n    pass\n"
+        result = ai_pipeline._sanitize_generated_code(code, "app.py")
+        self.assertIn("# This is a really", result)
+
+    def test_preserves_short_lines(self):
+        code = "x = 1\ny = 2\nresult = x + y\n"
+        result = ai_pipeline._sanitize_generated_code(code, "app.py")
+        self.assertEqual(result, code)
+
+    def test_non_python_files_skip_prose_filter(self):
+        code = "This is a description of the requirements for the project that should be included in the file\n"
+        result = ai_pipeline._sanitize_generated_code(code, "requirements.txt")
+        self.assertIn("This is a description", result)
+

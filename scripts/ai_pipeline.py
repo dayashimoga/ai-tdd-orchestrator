@@ -217,10 +217,50 @@ def validate_llm_response(raw_output: str) -> Tuple[bool, str]:
     return True, ""
 
 
+def _sanitize_generated_code(content: str, file_path: str) -> str:
+    """CG5: Post-process generated code to fix common LLM output issues.
+    
+    1. Strips conversational text that the LLM embeds after code blocks
+    2. Fixes 'from your_project.X import' → 'from X import' (incorrect absolute imports)
+    3. Removes markdown artifacts left inside code
+    """
+    lines = content.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        # Skip lines that look like conversational English prose (not code)
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#') and not stripped.startswith('"""') and not stripped.startswith("'''"):
+            # Detect conversational text: long lines with no code characters
+            if (len(stripped) > 60 
+                and '=' not in stripped 
+                and '(' not in stripped 
+                and ')' not in stripped
+                and ':' not in stripped
+                and 'import' not in stripped
+                and not stripped.startswith('def ')
+                and not stripped.startswith('class ')
+                and not stripped.startswith('@')
+                and not stripped.startswith('raise ')
+                and not stripped.startswith('return ')
+                and not stripped.startswith('assert ')
+                and file_path.endswith('.py')):
+                print(f"  ⚠️ Stripped conversational text from {file_path}: '{stripped[:60]}...'")
+                continue
+        cleaned_lines.append(line)
+    
+    content = '\n'.join(cleaned_lines)
+    
+    # Fix incorrect absolute imports: 'from your_project.X import' → 'from X import'
+    content = re.sub(r'from\s+your_project\.', 'from ', content)
+    content = re.sub(r'import\s+your_project\.', 'import ', content)
+    
+    return content
+
+
 def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> int:
     """Parses LLM '--- FILE: path ---' delimited output and writes files.
 
-    Includes E5 syntax validation before writing Python files.
+    Includes E5 syntax validation and CG5 post-processing before writing.
     Returns the number of files written.
     """
     files_written = 0
@@ -243,6 +283,9 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
             content = raw_content.strip()
             
         if content:
+            # CG5: Post-process to fix common LLM mistakes
+            content = _sanitize_generated_code(content, file_path)
+            
             # E5: Syntax validation for Python files
             valid, err = validate_python_syntax(content, file_path)
             if not valid:
@@ -625,6 +668,10 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
         "If the task involves testing, use `pytest` with descriptive test names.\n\n"
         "CRITICAL: You MUST ALWAYS generate a requirements.txt file listing ALL third-party dependencies "
         "(e.g. flask, fastapi, requests, sqlalchemy, etc.). Without this file, tests will fail with ModuleNotFoundError.\n\n"
+        "CRITICAL: Do NOT include any explanations, descriptions, or English prose inside code files. "
+        "Every line in a .py file must be valid Python syntax. Comments using # are fine.\n\n"
+        "CRITICAL: Do NOT use 'from your_project.X import' — use 'from X import' instead. "
+        "The project root is already on sys.path.\n\n"
         "OUTPUT FORMAT (you MUST follow this exactly):\n"
         "--- FILE: requirements.txt ---\n"
         "```\n"
@@ -905,13 +952,20 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
 
                     # TF2: Progressive retry strategy
                     test_files_context = ""
+                    source_files_context = ""
                     for root, _, files in os.walk("your_project"):
                         for tf in files:
+                            file_full = os.path.join(root, tf)
                             if tf.startswith("test_") and (tf.endswith(".py") or tf.endswith(".js") or tf.endswith(".ts") or tf.endswith(".go")):
-                                test_path = os.path.join(root, tf)
                                 try:
-                                    with open(test_path, "r") as ff:
-                                        test_files_context += f"\n--- TEST FILE: {test_path} ---\n{ff.read()}\n"
+                                    with open(file_full, "r") as ff:
+                                        test_files_context += f"\n--- TEST FILE: {file_full} ---\n{ff.read()}\n"
+                                except Exception:
+                                    pass
+                            elif tf.endswith(".py") and not tf.startswith("__") and 'conftest' not in tf:
+                                try:
+                                    with open(file_full, "r") as ff:
+                                        source_files_context += f"\n--- SOURCE FILE: {file_full} ---\n{ff.read()}\n"
                                 except Exception:
                                     pass
 
@@ -919,13 +973,21 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                         task_prompt = (
                             f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
                             f"Test failures:\n{concise_feedback}\n\n"
-                            f"Here are the test files for context:\n{test_files_context}"
+                            f"Here are ALL the source and test files you previously generated that FAILED:\n"
+                            f"{source_files_context}\n{test_files_context}\n\n"
+                            f"RULES: Do NOT include English prose inside .py files. "
+                            f"Use 'from app import X' NOT 'from your_project.app import X'. "
+                            f"Always generate requirements.txt with ALL dependencies."
                         )
                     elif retry_count == 2:
                         task_prompt = (
                             f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
                             f"Test failures persist:\n{concise_feedback}\n\n"
-                            f"Review the test files carefully to ensure you fix the exact assertion:\n{test_files_context}"
+                            f"HERE IS YOUR PREVIOUS BROKEN CODE (fix it, don't regenerate from scratch):\n"
+                            f"{source_files_context}\n{test_files_context}\n\n"
+                            f"RULES: Every line in .py files must be valid Python. No English sentences. "
+                            f"Use 'from app import X' NOT 'from your_project.app import X'. "
+                            f"Generate requirements.txt."
                         )
                     else:
                         # Retry 3+: Include conversation memory + expand context
@@ -933,9 +995,12 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                         task_prompt = (
                             f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
                             f"Test failures:\n{concise_feedback}\n\n"
-                            f"IMPORTANT: Previous fix attempts did NOT work. Here is what was tried:\n{memory_text}\n\n"
-                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes.\n\n"
-                            f"Test files context:\n{test_files_context}"
+                            f"IMPORTANT: Previous {retry_count} fix attempts did NOT work. Here is what was tried:\n{memory_text}\n\n"
+                            f"HERE IS YOUR PREVIOUS BROKEN CODE:\n{source_files_context}\n{test_files_context}\n\n"
+                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes.\n"
+                            f"RULES: Every line in .py files must be valid Python. No English sentences. "
+                            f"Use 'from app import X' NOT 'from your_project.app import X'. "
+                            f"Generate requirements.txt."
                         )
 
                     # E3: Record what we're about to try
