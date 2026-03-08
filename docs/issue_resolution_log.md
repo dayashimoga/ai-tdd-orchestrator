@@ -62,3 +62,13 @@ Refer to this log when investigating identical or similar behavior patterns in t
 **Root Cause**: Pipeline cache files and debug pipes were not tracked natively.  
 **Resolution**:
 - Modified `.gitignore` to explicitly ban `out*.txt`, `.ast_cache/`, and `.repo_map_cache.json`.
+
+---
+
+## 7. Pipeline Crash: "Remote Origin Already Exists" on Fallback
+**Symptom**: If the user's GitHub API token lacked repository creation permissions (triggering the `422` or `403` fallback to existing project detection), the Orchestrator threw `Command '['git', 'remote', 'add', 'origin']' returned non-zero exit status 3.` and crashed the `ai_pipeline.py --manual` run.
+**Root Cause**: A Python indentation logic error caused the pipeline to execute `git init` and `git remote add origin` on the newly cloned fallback directory. A cloned repository natively establishes `origin`, causing the `git remote add` step to immediately crash.
+**Resolution**:
+- Re-scoped `setup_target_repository()` inside `ai_pipeline.py`.
+- Ensured GitHub CI workflow templating, `git init`, and `git remote add origin` strictly remain inside the `else` logic branch (used exclusively for instantiating net-new projects).
+- Migrated the Git Author configuration (`user.name`/`user.email`) to the unconditional execution tail of the function, ensuring both cloned and newly-generated repositories successfully support subsequent auto-commits for state rollback management.
