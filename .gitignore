@@ -50,6 +50,10 @@ pytest_cov*.txt
 pytest_out*.txt
 out.txt
 *.log
+out1.txt
+out2.txt
+3_ai-review.txt
+
 
 # Type checking & Linting
 .mypy_cache/

@@ -72,3 +72,22 @@ Refer to this log when investigating identical or similar behavior patterns in t
 - Re-scoped `setup_target_repository()` inside `ai_pipeline.py`.
 - Ensured GitHub CI workflow templating, `git init`, and `git remote add origin` strictly remain inside the `else` logic branch (used exclusively for instantiating net-new projects).
 - Migrated the Git Author configuration (`user.name`/`user.email`) to the unconditional execution tail of the function, ensuring both cloned and newly-generated repositories successfully support subsequent auto-commits for state rollback management.
+
+---
+
+## 8. TDD Loop Fails with "ModuleNotFoundError" for Generated Dependencies
+**Symptom**: The AI Engineer generates Flask/FastAPI/Django code, but every TDD iteration fails with `ModuleNotFoundError: No module named 'flask'`. All 5 retry loops hit the same error, and the code is never validated.
+**Root Cause**: The `run_pytest_validation()` function executed `pytest` directly without ever installing the project's generated `requirements.txt`. Even when the Engineer correctly generated a `requirements.txt`, the pipeline never ran `pip install -r requirements.txt`.
+**Resolution**:
+- Added `_install_project_dependencies()` function that auto-detects and installs `requirements.txt` from the generated project directory before every pytest validation run.
+- Enhanced the Engineer Agent prompt to explicitly require generating a `requirements.txt` file with all third-party dependencies, with a concrete example in the few-shot template.
+- Added `ModuleNotFoundError` detection in `extract_test_failures()` that extracts the missing module names and feeds explicit guidance back to the LLM: *"You MUST generate a requirements.txt containing these packages."*
+
+---
+
+## 9. Efficiency: Per-Task Retry Cap and Dependency Caching
+**Symptom**: A single stuck task would consume all 5 TDD iterations, leaving no budget for other tasks. Dependencies were redundantly reinstalled on every retry even when `requirements.txt` hadn't changed.
+**Resolution**:
+- Increased `MAX_TDD_ITERATIONS` from 5 → 15 (configurable via env var).
+- Added `MAX_RETRIES_PER_TASK=5` cap. If a task fails 5 consecutive retries, it is skipped and the orchestrator moves to the next pending task.
+- Added MD5 hash caching for `requirements.txt` — dependencies are only reinstalled when the file content changes, saving ~5-10s per retry iteration.

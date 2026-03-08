@@ -43,7 +43,8 @@ def _get_platform_url() -> str:
 OLLAMA_URL: str = os.getenv("OLLAMA_URL") or ""
 MODEL_NAME: str = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
 NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX") or "8192")
-MAX_TDD_ITERATIONS: int = int(os.getenv("MAX_TDD_ITERATIONS") or "5")
+MAX_TDD_ITERATIONS: int = int(os.getenv("MAX_TDD_ITERATIONS") or "15")
+MAX_RETRIES_PER_TASK: int = int(os.getenv("MAX_RETRIES_PER_TASK") or "5")
 
 GITHUB_TOKEN: Optional[str] = os.getenv("GITHUB_TOKEN")
 TARGET_REPO_TOKEN: Optional[str] = os.getenv("TARGET_REPO_TOKEN") or GITHUB_TOKEN
@@ -167,6 +168,16 @@ def extract_test_failures(raw_feedback: str) -> str:
                     missing_lines = " ".join(parts[4:])
                     if missing_lines:
                         failures.append(f"  - {file_name}: lines {missing_lines}")
+
+    # D1: Detect missing module errors and guide the LLM to fix requirements.txt
+    if "ModuleNotFoundError" in raw_feedback or "No module named" in raw_feedback:
+        import re as _re2
+        missing_modules = _re2.findall(r"No module named '([^']+)'", raw_feedback)
+        if missing_modules:
+            failures.append("\n❌ CRITICAL: ModuleNotFoundError detected!")
+            failures.append("The following modules are NOT installed: " + ", ".join(set(missing_modules)))
+            failures.append("You MUST generate a '--- FILE: requirements.txt ---' containing these packages.")
+            failures.append("Example: If you use flask, add 'flask>=3.0' to requirements.txt.")
 
     if not failures:
         # Fallback: return truncated version
@@ -611,20 +622,25 @@ def execute_task(task_description: str, use_cache: bool = False) -> None:
         f"Here is your optimized project context:\n{context}\n\n"
         "Generate fully functional, production-ready code. DO NOT generate dummy or placeholder code.\n"
         "If the task involves testing, use `pytest` with descriptive test names.\n\n"
+        "CRITICAL: You MUST ALWAYS generate a requirements.txt file listing ALL third-party dependencies "
+        "(e.g. flask, fastapi, requests, sqlalchemy, etc.). Without this file, tests will fail with ModuleNotFoundError.\n\n"
         "OUTPUT FORMAT (you MUST follow this exactly):\n"
-        "--- FILE: src/main.py ---\n"
-        "```python\n"
-        "def main():\n"
-        "    print('Hello World')\n\n"
-        "if __name__ == '__main__':\n"
-        "    main()\n"
+        "--- FILE: requirements.txt ---\n"
+        "```\n"
+        "flask>=3.0\n"
+        "pytest>=8.0\n"
         "```\n\n"
-        "--- FILE: tests/test_main.py ---\n"
+        "--- FILE: app.py ---\n"
         "```python\n"
-        "from src.main import main\n\n"
-        "def test_main(capsys):\n"
-        "    main()\n"
-        "    assert capsys.readouterr().out.strip() == 'Hello World'\n"
+        "from flask import Flask\n\n"
+        "app = Flask(__name__)\n"
+        "```\n\n"
+        "--- FILE: tests/test_app.py ---\n"
+        "```python\n"
+        "from app import app\n\n"
+        "def test_app():\n"
+        "    client = app.test_client()\n"
+        "    assert client.get('/').status_code == 200\n"
         "```\n\n"
         "Now generate your code following this EXACT format. Output ONLY '--- FILE:' blocks and code. NO other text."
     )
@@ -673,12 +689,55 @@ def detect_test_command(project_dir: str = "your_project") -> List[str]:
     return [sys.executable, "-m", "pytest", f"{project_dir}/", f"--cov={project_dir}/", "--cov-fail-under=90", "--cov-report=term-missing"]
 
 
+# Track installed deps to avoid redundant pip installs
+_deps_installed_hash: str = ""
+
+
+def _install_project_dependencies(project_dir: str = "your_project") -> None:
+    """Auto-install project dependencies from requirements.txt before running tests.
+    
+    D1: Caches a hash of requirements.txt to skip redundant installs on retries.
+    """
+    global _deps_installed_hash
+    req_file = os.path.join(project_dir, "requirements.txt")
+    if os.path.exists(req_file):
+        try:
+            with open(req_file, "r") as f:
+                content = f.read()
+            import hashlib
+            current_hash = hashlib.md5(content.encode()).hexdigest()
+            if current_hash == _deps_installed_hash:
+                print("\n📦 Dependencies already installed (unchanged). Skipping.")
+                return
+        except Exception:
+            current_hash = ""
+
+        print(f"\n📦 Installing dependencies from {req_file}...")
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", req_file, "-q"],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                print("✅ Dependencies installed successfully.")
+                _deps_installed_hash = current_hash
+            else:
+                print(f"⚠️ pip install warnings: {result.stderr[:300]}")
+        except Exception as e:
+            print(f"⚠️ Failed to install dependencies: {e}")
+    else:
+        print("ℹ️ No requirements.txt found in project. Skipping dependency install.")
+
+
 def run_pytest_validation(retry_mode: bool = False) -> Tuple[bool, str]:
     """Execute the detected test framework natively to enforce TDD behavior.
 
     Args:
         retry_mode: If True, uses --lf (last-failed) to only re-run failing tests (TF3).
     """
+    # D1: Auto-install project dependencies before running tests
+    _install_project_dependencies()
+
     test_cmd = detect_test_command()
     framework_name = "pytest" if "pytest" in str(test_cmd) else test_cmd[0]
 
@@ -792,9 +851,10 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
     - TF3: pytest --lf on retries
     - E3: Conversation memory across iterations
     - E7: Webhook notifications
+    - D2: Per-task retry cap (MAX_RETRIES_PER_TASK) to prevent one stuck task from consuming all iterations
     """
     print("\n==============================================")
-    print(f"🔄 TDD ORCHESTRATOR: ENGAGED (Max Iterations: {max_iterations})")
+    print(f"🔄 TDD ORCHESTRATOR: ENGAGED (Max Iterations: {max_iterations}, Per-Task Retry Cap: {MAX_RETRIES_PER_TASK})")
     print("==============================================")
 
     current_feedback = ""
@@ -804,6 +864,7 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
     retry_count = 0  # TF2: Track consecutive retries for the same task
     iteration_memory: List[str] = []  # E3: What the LLM tried in previous iterations
     last_coverage_output = ""  # TF4: Reuse coverage stats
+    skipped_tasks: List[str] = []  # D2: Tasks skipped after hitting per-task retry cap
 
     for iteration in range(max_iterations):
         if not os.path.exists("your_project/project_tasks.md"):
@@ -824,9 +885,19 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                 is_retry = bool(current_feedback)
                 if is_retry:
                     retry_count += 1
+
+                    # D2: Per-task retry cap — skip this task if it's stuck
+                    if retry_count > MAX_RETRIES_PER_TASK:
+                        print(f"\n⚠️ Task '{base_task_description}' hit retry cap ({MAX_RETRIES_PER_TASK}). Skipping to next task.")
+                        skipped_tasks.append(base_task_description)
+                        current_feedback = ""
+                        retry_count = 0
+                        iteration_memory = []
+                        break  # Move to next outer iteration which re-reads tasks
+
                     # TF1: Extract only the key failures for concise feedback
                     concise_feedback = extract_test_failures(current_feedback)
-                    print(f"🎯 PURPOSE: Fixing failing tests for '{base_task_description}' (retry #{retry_count})")
+                    print(f"🎯 PURPOSE: Fixing failing tests for '{base_task_description}' (retry #{retry_count}/{MAX_RETRIES_PER_TASK})")
 
                     # TF2: Progressive retry strategy
                     test_files_context = ""
