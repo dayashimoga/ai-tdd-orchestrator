@@ -1,0 +1,20 @@
+# Terraform state and provider files
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Cloud-init generated file (template output)
+cloud_init.sh
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Variable override files
+*.tfvars
+*.tfvars.json
+!example.tfvars
+
+# Plan files
+*.tfplan
