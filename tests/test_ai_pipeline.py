@@ -362,15 +362,25 @@ class TestTDDLoop(unittest.TestCase):
 
     def test_save_rollback_point(self):
         with patch('scripts.ai_pipeline.git_run') as mock_git:
-            mock_git.return_value = MagicMock(stdout="abc123def")
+            # We need to simulate the sequence of git commands: add, status, commit, rev-parse
+            mock_status = MagicMock()
+            mock_status.stdout = " M file.py"
+            mock_git.side_effect = [
+                MagicMock(),            # git add .
+                mock_status,            # git status --porcelain
+                MagicMock(),            # git commit -m ...
+                MagicMock(stdout="abc123def") # git rev-parse HEAD
+            ]
             result = ai_pipeline.save_rollback_point()
             self.assertEqual(result, "abc123def")
+            self.assertEqual(mock_git.call_count, 4)
 
     def test_rollback_if_worse(self):
         with patch('scripts.ai_pipeline.git_run') as mock_git:
             with patch('builtins.print'):
                 ai_pipeline.rollback_if_worse("abc123", False)
-                mock_git.assert_called_once()
+                # It should call reset --hard and clean -fd
+                self.assertEqual(mock_git.call_count, 2)
 
     def test_rollback_skipped_on_success(self):
         with patch('scripts.ai_pipeline.git_run') as mock_git:
