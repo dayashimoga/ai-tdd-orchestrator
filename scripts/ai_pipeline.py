@@ -261,6 +261,8 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
     """Parses LLM '--- FILE: path ---' delimited output and writes files.
 
     Includes E5 syntax validation and CG5 post-processing before writing.
+    CG6: Refuses to write syntax-invalid Python files (prevents broken files
+    from being committed into rollback snapshots).
     Returns the number of files written.
     """
     files_written = 0
@@ -286,11 +288,12 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
             # CG5: Post-process to fix common LLM mistakes
             content = _sanitize_generated_code(content, file_path)
             
-            # E5: Syntax validation for Python files
+            # E5 + CG6: Syntax validation — REFUSE to write invalid Python files
             valid, err = validate_python_syntax(content, file_path)
             if not valid:
                 syntax_errors.append(err)
-                print(f"⚠️ {err} — writing anyway (will be caught by tests)")
+                print(f"❌ REJECTED {file_path}: {err} — file NOT written (prevents snapshot pollution)")
+                continue  # CG6: Skip writing this broken file entirely
 
             validated = safe_path(file_path, target_dir)
             if validated:
@@ -301,7 +304,7 @@ def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> 
                 files_written += 1
 
     if syntax_errors:
-        print(f"\n⚠️ {len(syntax_errors)} Python file(s) had syntax errors pre-write")
+        print(f"\n⚠️ {len(syntax_errors)} Python file(s) REJECTED due to syntax errors")
 
     return files_written
 
@@ -586,7 +589,7 @@ def update_task_plan(new_prompt: str) -> None:
             f.write(plan_output + "\n\n")
 
 
-def execute_task(task_description: str, use_cache: bool = False, base_task: str = "") -> None:
+def execute_task(task_description: str, use_cache: bool = False, base_task: str = "") -> int:
     """Agent 2 (The Engineer): Generates code with Repo Map context optimization.
 
     Args:
@@ -594,6 +597,9 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
         use_cache: If True, reuse the cached repo map and discovery results
                    from a previous call (saves an LLM round-trip on retries).
         base_task: The original task name (stable across retries) for cache keys.
+    
+    Returns:
+        Number of files written (0 if LLM failed completely).
     """
     global _repo_map_cache, _discovery_cache
     print(f"\n[Engineer] Executing Task: {task_description}")
@@ -696,7 +702,7 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
     if DRY_RUN:
         print("\n🏜️  DRY RUN — skipping code generation. Would send this prompt:")
         print(engineer_prompt[:500] + "...")
-        return
+        return 0
 
     # E8: Retry LLM if response is malformed (up to 2 extra attempts)
     raw_output = ""
@@ -709,9 +715,10 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
         if attempt < 2:
             print("🔄 Retrying LLM call...")
 
-    parse_and_write_files(raw_output, "your_project")
+    files_written = parse_and_write_files(raw_output, "your_project")
     # Invalidate repo map cache after files change
     _repo_map_cache = None
+    return files_written
 
 
 def detect_test_command(project_dir: str = "your_project") -> List[str]:
@@ -1013,7 +1020,14 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                 print("==============================================\n")
 
                 rollback_hash = save_rollback_point()
-                execute_task(task_prompt, use_cache=is_retry, base_task=base_task_description)
+                files_written = execute_task(task_prompt, use_cache=is_retry, base_task=base_task_description)
+
+                # CG7: If LLM produced zero valid files, skip pytest entirely
+                if files_written == 0:
+                    print("⚠️ LLM generated 0 valid files. Skipping test validation for this iteration.")
+                    rollback_if_worse(rollback_hash, False)
+                    current_feedback = "LLM failed to generate any valid code files. All providers may be rate-limited or unavailable."
+                    break
 
                 # D4: Auto-create conftest.py to fix import issues
                 conftest_path = os.path.join("your_project", "conftest.py")
@@ -1021,6 +1035,18 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                     with open(conftest_path, "w") as cf:
                         cf.write("import sys, os\nsys.path.insert(0, os.path.dirname(__file__))\n")
                     print("📄 Created conftest.py for clean imports")
+
+                # CG8: Pre-pytest scan — delete any syntax-broken .py files
+                for root, _, pfiles in os.walk("your_project"):
+                    for pf in pfiles:
+                        if pf.endswith(".py") and not pf.startswith("__"):
+                            full_path = os.path.join(root, pf)
+                            try:
+                                with open(full_path, "r", encoding="utf-8", errors="ignore") as fcheck:
+                                    ast_module.parse(fcheck.read())
+                            except SyntaxError:
+                                print(f"❌ Deleting syntax-broken file before pytest: {full_path}")
+                                os.remove(full_path)
 
                 # TF3: Use --lf on retries to only re-run failing tests
                 success, feedback = run_pytest_validation(retry_mode=is_retry)

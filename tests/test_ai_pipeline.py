@@ -98,18 +98,17 @@ class TestUtilities(unittest.TestCase):
         self.assertIn("no code blocks", err)
 
     def test_parse_and_write_files_syntax_error(self):
-        # Lines 208, 209, 220: Syntax error handling
+        # CG6: Syntax-invalid Python files are now REFUSED (not written)
         raw = "--- FILE: bad.py ---\ndef foo("
         with patch('scripts.ai_pipeline.safe_path', return_value="your_project/bad.py"):
             with patch('os.makedirs'):
                 with patch('builtins.open', mock_open()):
                     with patch('builtins.print') as mock_print:
-                        # Mock validate_python_syntax to return a stable error string
                         with patch('scripts.ai_pipeline.validate_python_syntax', return_value=(False, "SyntaxError in bad.py: stable error")):
                             count = ai_pipeline.parse_and_write_files(raw, "your_project")
-                            self.assertEqual(count, 1)
-                            mock_print.assert_any_call("⚠️ SyntaxError in bad.py: stable error — writing anyway (will be caught by tests)")
-                            mock_print.assert_any_call("\n⚠️ 1 Python file(s) had syntax errors pre-write")
+                            self.assertEqual(count, 0)  # CG6: file NOT written
+                            mock_print.assert_any_call("❌ REJECTED bad.py: SyntaxError in bad.py: stable error — file NOT written (prevents snapshot pollution)")
+                            mock_print.assert_any_call("\n⚠️ 1 Python file(s) REJECTED due to syntax errors")
 
     def test_extract_failures_full_short_summary(self):
         # Cover lines 131, 134-140
@@ -977,4 +976,71 @@ class TestSanitizeGeneratedCode(unittest.TestCase):
         code = "This is a description of the requirements for the project that should be included in the file\n"
         result = ai_pipeline._sanitize_generated_code(code, "requirements.txt")
         self.assertIn("This is a description", result)
+
+
+class TestGetGithubClient(unittest.TestCase):
+    """Cover get_github_client line 79."""
+
+    @patch('scripts.ai_pipeline.Github')
+    def test_get_github_client_with_token(self, mock_github):
+        ai_pipeline.get_github_client("test_token")
+        mock_github.assert_called_once_with("test_token")
+
+
+class TestValidateLLMResponseEdge(unittest.TestCase):
+    """Cover validate_llm_response edge cases."""
+
+    def test_empty_response(self):
+        valid, err = ai_pipeline.validate_llm_response("")
+        self.assertFalse(valid)
+        self.assertIn("empty", err.lower())
+
+    def test_conversational_response(self):
+        valid, err = ai_pipeline.validate_llm_response(
+            "Sure! I'd be happy to help you build a REST API. Here is a simple flask application that manages tasks."
+        )
+        self.assertFalse(valid)
+        self.assertIn("no code blocks", err.lower())
+
+
+class TestRollbackDepCacheReset(unittest.TestCase):
+    """Cover rollback_if_worse dep cache reset."""
+
+    @patch('scripts.ai_pipeline.git_run')
+    def test_rollback_resets_dep_cache(self, mock_git):
+        ai_pipeline._deps_installed_hash = "abc123"
+        ai_pipeline.rollback_if_worse("fake_hash", False)
+        self.assertEqual(ai_pipeline._deps_installed_hash, "")
+
+    def test_rollback_skip_on_success(self):
+        ai_pipeline._deps_installed_hash = "abc123"
+        ai_pipeline.rollback_if_worse("fake_hash", True)
+        self.assertEqual(ai_pipeline._deps_installed_hash, "abc123")  # Not reset
+
+
+class TestExecuteTaskReturn(unittest.TestCase):
+    """Cover execute_task return value paths."""
+
+    def test_dry_run_returns_zero(self):
+        original = ai_pipeline.DRY_RUN
+        ai_pipeline.DRY_RUN = True
+        try:
+            result = ai_pipeline.execute_task("test task")
+            self.assertEqual(result, 0)
+        finally:
+            ai_pipeline.DRY_RUN = original
+
+
+class TestParseWriteFilesReject(unittest.TestCase):
+    """Cover CG6 reject path in parse_and_write_files."""
+
+    def test_syntax_invalid_file_rejected(self):
+        """Directly test that invalid Python is NOT written."""
+        raw = "--- FILE: broken.py ---\ndef foo(\n--- FILE: good.txt ---\nhello world"
+        with patch('scripts.ai_pipeline.safe_path', return_value="your_project/good.txt"):
+            with patch('os.makedirs'):
+                with patch('builtins.open', mock_open()):
+                    count = ai_pipeline.parse_and_write_files(raw, "your_project")
+                    # Only the .txt file should be written, not the broken .py
+                    self.assertEqual(count, 1)
 
