@@ -138,6 +138,7 @@ def _ollama_generate(prompt: str, model: str, base_url: str,
 
     if stream:
         chunks: List[str] = []
+        token_usage = {}
         for line in response.iter_lines():
             if line:
                 chunk = json.loads(line)
@@ -145,10 +146,20 @@ def _ollama_generate(prompt: str, model: str, base_url: str,
                 chunks.append(word)
                 sys.stdout.write(word)
                 sys.stdout.flush()
+                
+                if chunk.get("done", False):
+                    token_usage["prompt_eval_count"] = chunk.get("prompt_eval_count", 0)
+                    token_usage["eval_count"] = chunk.get("eval_count", 0)
         print()
+        if token_usage:
+            pt = token_usage.get("prompt_eval_count", 0)
+            ct = token_usage.get("eval_count", 0)
+            print(f"\n📊 [TOKEN USAGE] Prompt: {pt} | Generated: {ct} | Total: {pt + ct}\n")
         return "".join(chunks)
     else:
-        return response.json().get("response", "")
+        resp = response.json()
+        print(f"\n📊 [TOKEN USAGE] Prompt: {resp.get('prompt_eval_count', 0)} | Generated: {resp.get('eval_count', 0)}\n")
+        return resp.get("response", "")
 
 
 def _openai_compatible_generate(prompt: str, model: str, api_key: str,
@@ -168,6 +179,9 @@ def _openai_compatible_generate(prompt: str, model: str, api_key: str,
         "temperature": temperature,
         "stream": stream,
     }
+    if stream:
+        payload["stream_options"] = {"include_usage": True}
+
     response = _retry_request(
         "POST", f"{base_url}/chat/completions",
         headers=headers, json=payload, timeout=300, stream=stream,
@@ -175,6 +189,7 @@ def _openai_compatible_generate(prompt: str, model: str, api_key: str,
 
     if stream:
         chunks: List[str] = []
+        token_usage = None
         for line in response.iter_lines():
             if line:
                 line_str = line.decode("utf-8") if isinstance(line, bytes) else line
@@ -182,17 +197,34 @@ def _openai_compatible_generate(prompt: str, model: str, api_key: str,
                     data = line_str[6:]
                     if data.strip() == "[DONE]":
                         break
-                    chunk = json.loads(data)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    word = delta.get("content", "")
-                    if word:
-                        chunks.append(word)
-                        sys.stdout.write(word)
-                        sys.stdout.flush()
+                    try:
+                        chunk = json.loads(data)
+                        
+                        # Extract usage on final chunks
+                        if "usage" in chunk and chunk["usage"] is not None:
+                            token_usage = chunk["usage"]
+                            
+                        delta = chunk.get("choices", [{}])[0].get("delta", {}) if chunk.get("choices") else {}
+                        word = delta.get("content", "")
+                        if word:
+                            chunks.append(word)
+                            sys.stdout.write(word)
+                            sys.stdout.flush()
+                    except json.JSONDecodeError:
+                        continue
         print()
+        if token_usage:
+            prompt_tok = token_usage.get("prompt_tokens", 0)
+            comp_tok = token_usage.get("completion_tokens", 0)
+            print(f"\n📊 [TOKEN USAGE] Prompt: {prompt_tok} | Generated: {comp_tok} | Total: {prompt_tok + comp_tok}\n")
+            
         return "".join(chunks)
     else:
-        return response.json()["choices"][0]["message"]["content"]
+        resp_json = response.json()
+        if "usage" in resp_json:
+            u = resp_json["usage"]
+            print(f"\n📊 [TOKEN USAGE] Prompt: {u.get('prompt_tokens', 0)} | Generated: {u.get('completion_tokens', 0)}\n")
+        return resp_json["choices"][0]["message"]["content"]
 
 
 def _openai_generate(prompt: str, model: str, api_key: str,
@@ -240,7 +272,11 @@ def _anthropic_generate(prompt: str, model: str, api_key: str,
         "POST", "https://api.anthropic.com/v1/messages",
         headers=headers, json=payload, timeout=300,
     )
-    blocks = response.json().get("content", [])
+    resp_json = response.json()
+    blocks = resp_json.get("content", [])
+    if "usage" in resp_json:
+        u = resp_json["usage"]
+        print(f"\n📊 [TOKEN USAGE] Prompt: {u.get('input_tokens', 0)} | Generated: {u.get('output_tokens', 0)}\n")
     return "".join(b.get("text", "") for b in blocks)
 
 
@@ -260,6 +296,7 @@ def _gemini_generate(prompt: str, model: str, api_key: str,
 
     if stream:
         chunks: List[str] = []
+        token_usage = None
         for line in response.iter_lines():
             if line:
                 line_str = line.decode("utf-8") if isinstance(line, bytes) else line
@@ -267,6 +304,9 @@ def _gemini_generate(prompt: str, model: str, api_key: str,
                     data = line_str[6:]
                     try:
                         chunk = json.loads(data)
+                        if "usageMetadata" in chunk:
+                            token_usage = chunk["usageMetadata"]
+                            
                         candidates = chunk.get("candidates", [])
                         if candidates:
                             parts = candidates[0].get("content", {}).get("parts", [])
@@ -279,9 +319,17 @@ def _gemini_generate(prompt: str, model: str, api_key: str,
                     except json.JSONDecodeError:
                         continue
         print()
+        if token_usage:
+            prompt_tok = token_usage.get("promptTokenCount", 0)
+            comp_tok = token_usage.get("candidatesTokenCount", 0)
+            print(f"\n📊 [TOKEN USAGE] Prompt: {prompt_tok} | Generated: {comp_tok} | Total: {token_usage.get('totalTokenCount', 0)}\n")
         return "".join(chunks)
     else:
-        candidates = response.json().get("candidates", [])
+        resp_json = response.json()
+        candidates = resp_json.get("candidates", [])
+        if "usageMetadata" in resp_json:
+            u = resp_json["usageMetadata"]
+            print(f"\n📊 [TOKEN USAGE] Prompt: {u.get('promptTokenCount', 0)} | Generated: {u.get('candidatesTokenCount', 0)}\n")
         if candidates:
             parts = candidates[0].get("content", {}).get("parts", [])
             return "".join(p.get("text", "") for p in parts)

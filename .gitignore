@@ -112,6 +112,9 @@ prompt_override.txt
 output.log
 pylint_report.txt
 complexity_report.txt
+out*.txt
+.repo_map_cache.json
+.ast_cache/
 
 # GPU Notebooks (output artifacts)
 gpu-notebooks/*.log

@@ -359,6 +359,11 @@ def setup_target_repository() -> None:
         git_run(["git", "init"], check=True)
         git_run(["git", "checkout", "-b", "main"])
 
+    # E1: Unconditionally apply git author configs so rollback commits succeed
+    git_run(["git", "config", "user.name", "ai-orchestrator"], check=False)
+    git_run(["git", "config", "user.email", "actions@github.com"], check=False)
+
+    try:
         workflow_dir = os.path.join("your_project", ".github", "workflows")
         os.makedirs(workflow_dir, exist_ok=True)
         workflow_path = os.path.join(workflow_dir, "python-test.yml")
@@ -366,17 +371,17 @@ def setup_target_repository() -> None:
             f.write("name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: '3.11'\n      - run: pip install pytest pytest-cov\n      - run: pip install -r requirements.txt || true\n      - run: pytest --cov=./ --cov-fail-under=90")
 
         git_run(["git", "add", "."], check=True)
-        git_run(["git", "config", "user.name", "ai-orchestrator"])
-        git_run(["git", "config", "user.email", "actions@github.com"])
-        git_run(["git", "commit", "-m", "chore: setup AI orchestrator repo"], check=True)
+        git_run(["git", "commit", "-m", "chore: setup AI orchestrator repo"], check=False)
+    except Exception:
+        pass
 
-        remote_url = f"https://oauth2:{TARGET_REPO_TOKEN}@github.com/{TARGET_REPO}.git"
-        git_run(["git", "remote", "add", "origin", remote_url], check=True)
-        try:
-            git_run(["git", "push", "-u", "origin", "main"], check=True)
-            print("✅ Initializer workflow pushed to remote.")
-        except Exception as e:
-            print(f"⚠️ Failed to push initialization to remote: {mask_secret(str(e), TARGET_REPO_TOKEN)}")
+    remote_url = f"https://oauth2:{TARGET_REPO_TOKEN}@github.com/{TARGET_REPO}.git"
+    git_run(["git", "remote", "add", "origin", remote_url], check=True)
+    try:
+        git_run(["git", "push", "-u", "origin", "main"], check=True)
+        print("✅ Initializer workflow pushed to remote.")
+    except Exception as e:
+        print(f"⚠️ Failed to push initialization to remote: {mask_secret(str(e), TARGET_REPO_TOKEN)}")
 
 
 def push_to_target_repository() -> None:
@@ -747,7 +752,7 @@ def save_rollback_point() -> Optional[str]:
         git_run(["git", "add", "."], capture_output=True)
         status = git_run(["git", "status", "--porcelain"], capture_output=True, text=True)
         if status.stdout.strip():
-            git_run(["git", "commit", "-m", "chore: pre-iteration state snapshot"], capture_output=True)
+            git_run(["git", "commit", "-m", "chore: pre-iteration state snapshot"], check=False)
             
         result = git_run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
         commit_hash = result.stdout.strip()
