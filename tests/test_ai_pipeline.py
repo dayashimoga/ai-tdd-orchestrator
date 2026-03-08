@@ -314,7 +314,7 @@ class TestTDDLoop(unittest.TestCase):
         
     @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task 1\n- [ ] New Task")
     @patch('os.makedirs')
-    @patch('os.path.exists', side_effect=[True, True])
+    @patch('os.path.exists', side_effect=[True, True, True])
     @patch('builtins.open', new_callable=mock_open, read_data="- [ ] Task 1\n")
     @patch('builtins.print')
     def test_update_task_plan_existing(self, mock_print, mock_file, mock_exists, mock_makedirs, mock_gen):
@@ -323,7 +323,7 @@ class TestTDDLoop(unittest.TestCase):
         
     @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task 1\n- [ ] New Task")
     @patch('os.makedirs')
-    @patch('os.path.exists', side_effect=[False, True])
+    @patch('os.path.exists', side_effect=[False, True, True])
     @patch('builtins.open', new_callable=mock_open, read_data="- [ ] Task 1\n")
     @patch('builtins.print')
     def test_update_task_plan_new_req(self, mock_print, mock_file, mock_exists, mock_makedirs, mock_gen):
