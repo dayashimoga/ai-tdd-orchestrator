@@ -439,7 +439,8 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
         try:
             return _call_provider(prov, prompt, temperature, stream, num_ctx)
         except ValueError:
-            # API key not set — skip silently
+            # API key not set — skip, but log it so the user knows why
+            print(f"  ⏭️  Skipping {prov.upper()}: API key not configured")
             continue
         except requests.exceptions.HTTPError as e:
             last_error = e

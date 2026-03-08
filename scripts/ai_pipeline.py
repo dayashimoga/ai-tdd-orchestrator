@@ -87,11 +87,20 @@ def mask_secret(text: str, secret: Optional[str]) -> str:
 
 
 def safe_path(path: str, sandbox: str = "your_project") -> Optional[str]:
-    """Validates and sandboxes a file path using realpath."""
+    """Validates and sandboxes a file path using realpath.
+    Auto-prepends the sandbox directory if the LLM omitted it.
+    """
     normalized = os.path.normpath(path.strip().lstrip("/"))
+    
+    # CG9: If LLM generated "app.py" instead of "your_project/app.py", auto-prefix it
+    if not normalized.startswith(sandbox) and not normalized.startswith(sandbox + os.sep):
+        normalized = os.path.normpath(os.path.join(sandbox, normalized))
+        print(f"  ⚠️ Auto-prefixed missing sandbox directory: -> {normalized}")
+        
     real = os.path.realpath(normalized)
     sandbox_real = os.path.realpath(sandbox)
     if not real.startswith(sandbox_real):
+        print(f"  ❌ Security reject: {path} escapes sandbox {sandbox}")
         return None
     return normalized
 
@@ -555,8 +564,12 @@ def update_task_plan(new_prompt: str) -> None:
     os.makedirs(os.path.dirname(req_path), exist_ok=True)
     
     if os.path.exists(req_path):
-        with open(req_path, "a", encoding="utf-8") as f:
-            f.write(f"\n\n## New Requirements (Update)\n{new_prompt}\n")
+        with open(req_path, "r", encoding="utf-8") as f:
+            existing_reqs = f.read()
+            
+        if new_prompt.strip() not in existing_reqs:
+            with open(req_path, "a", encoding="utf-8") as f:
+                f.write(f"\n\n## New Requirements (Update)\n{new_prompt}\n")
     else:
         with open(req_path, "w", encoding="utf-8") as f:
             f.write(f"# Project Requirements\n\n{new_prompt}\n")
