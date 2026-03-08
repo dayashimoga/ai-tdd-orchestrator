@@ -22,6 +22,7 @@
 15. [LLM Embeds English Prose in Code Files](#15-llm-embeds-english-prose-in-code-files)
 16. [LLM Generates Incorrect Import Paths](#16-llm-generates-incorrect-import-paths)
 17. [Identical Failures Across All Retry Iterations](#17-identical-failures-across-all-retry-iterations)
+18. [Silent File Rejection on Missing Sandbox Prefix](#18-silent-file-rejection-on-missing-sandbox-prefix)
 
 ---
 
@@ -309,6 +310,27 @@ Output format: `📊 [TOKEN USAGE] Prompt: X | Generated: Y | Total: Z`
   ```
 - **Retry 3+**: Includes conversation memory of all previous attempts with the instruction: *"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes."*
 - Each retry prompt reinforces the three critical rules: no prose in code, correct import paths, generate `requirements.txt`.
+
+---
+
+## 18. Silent File Rejection on Missing Sandbox Prefix
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | The LLM generates perfectly valid files (e.g. `app.py`, `project_tasks.py`), but the orchestrator prints `⚠️ LLM generated 0 valid files. Skipping test validation` and skips testing entirely. |
+| **Log Signature** | `⚠️  LLM generated 0 valid files. Skipping test validation for this iteration.` (even though the `--- FILE:` outputs in the log are clearly non-empty) |
+| **Severity** | **Critical** — forces an instant fallback to `rollback_if_worse`, driving the pipeline into an infinite loop |
+
+**Root Cause**: 
+The `safe_path(path, sandbox)` function validates that every generated file lives inside the `your_project/` directory. If the LLM outputted `--- FILE: app.py ---` instead of `--- FILE: your_project/app.py ---`, `safe_path` detected that the generated absolute path did not start with `sandbox`, returned `None`, and the orchestrator **silently skipped writing the file to disk**. Because 0 files were written, the pipeline aborted the iteration without ever running pytest.
+
+**Resolution** (`ai_pipeline.py::safe_path`):
+- Modified `safe_path` to **auto-prefix** the `sandbox` directory onto the file path if it was omitted by the LLM. 
+  ```python
+  if not normalized.startswith(sandbox) and not normalized.startswith(sandbox + os.sep):
+      normalized = os.path.normpath(os.path.join(sandbox, normalized))
+  ```
+- The orchestrator now successfully intercepts `app.py` and transparently writes it to `your_project/app.py`. Added a warning log `⚠️ Auto-prefixed missing sandbox directory:` to ensure visibility.
 
 ---
 
