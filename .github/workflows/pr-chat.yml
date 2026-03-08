@@ -57,6 +57,34 @@ jobs:
 
           cat << 'EOF' > check_gpu.py
           import sys, os
+          
+          # Check for Cloud Providers first
+          provider = os.getenv("LLM_PROVIDER", "auto").lower()
+          cloud_configs = [
+              ("groq", "GROQ_API_KEY"),
+              ("cerebras", "CEREBRAS_API_KEY"),
+              ("openai", "OPENAI_API_KEY"),
+              ("anthropic", "ANTHROPIC_API_KEY"),
+              ("gemini", "GOOGLE_API_KEY"),
+          ]
+          has_cloud = False
+          if provider == "auto":
+              for name, key in cloud_configs:
+                  if os.getenv(key):
+                      print(f"✅ Found cloud provider ({name}) via auto failover.")
+                      has_cloud = True
+                      break
+          else:
+              for name, key in cloud_configs:
+                  if provider == name and os.getenv(key):
+                      print(f"✅ Found explicit cloud provider: {name}")
+                      has_cloud = True
+                      break
+                      
+          if has_cloud:
+              sys.exit(0)
+
+          # Fallback to checking remote Ollama GPU
           sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
           import scripts.gpu_platform as gpu_platform
           platform, url = gpu_platform.select_platform()
