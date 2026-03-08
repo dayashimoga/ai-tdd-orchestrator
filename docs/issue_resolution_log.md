@@ -91,3 +91,33 @@ Refer to this log when investigating identical or similar behavior patterns in t
 - Increased `MAX_TDD_ITERATIONS` from 5 → 15 (configurable via env var).
 - Added `MAX_RETRIES_PER_TASK=5` cap. If a task fails 5 consecutive retries, it is skipped and the orchestrator moves to the next pending task.
 - Added MD5 hash caching for `requirements.txt` — dependencies are only reinstalled when the file content changes, saving ~5-10s per retry iteration.
+
+---
+
+## 10. Optimization: Stable Discovery Cache Key
+**Problem:** The file-discovery LLM call used `task_description[:80]` as cache key, which changes on every retry (because the prompt gains error context). Result: the discovery cache was never reused on retries.
+**Fix:** Changed to use `base_task` (the original task name, stable across retries) as the cache key, saving 1 LLM round-trip (~2-5s) per retry.
+
+---
+
+## 11. Accuracy: Always Use Latest Feedback on Failure
+**Problem:** `current_feedback = feedback if not current_feedback else current_feedback` discarded the 2nd+ failure's feedback if `current_feedback` was already set. The LLM saw stale errors.
+**Fix:** Changed to always update: `current_feedback = feedback`.
+
+---
+
+## 12. Accuracy: Auto-Create conftest.py for Clean Imports
+**Problem:** Tests failed with `ImportError` because `your_project/` wasn't on `sys.path`. The LLM generated `from your_project.app import app` which only works if `your_project` is an installed package.
+**Fix:** Auto-create `your_project/conftest.py` with `sys.path.insert(0, os.path.dirname(__file__))` after code generation, ensuring pytest can resolve project modules.
+
+---
+
+## 13. Speed: Quieter Pytest Output
+**Problem:** Verbose pytest headers/progress consumed token budget when sent back to the LLM as error feedback.
+**Fix:** Added `--no-header -q` flags to pytest commands, reducing feedback size by ~40%.
+
+---
+
+## 14. Efficiency: Reset Dep Cache on Rollback
+**Problem:** After `git reset --hard`, `requirements.txt` may have changed but the installer skipped re-install due to stale hash.
+**Fix:** Reset `_deps_installed_hash = ""` inside `rollback_if_worse()` to force re-evaluation.
