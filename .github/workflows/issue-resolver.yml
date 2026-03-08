@@ -26,7 +26,7 @@ jobs:
           cache: 'pip'
 
       - name: Cache Testing Virtual Environment
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .test_venv
           key: ${{ runner.os }}-test-venv-${{ hashFiles('requirements.txt') }}
@@ -43,6 +43,7 @@ jobs:
         id: gpu_scan
         env:
           GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'ollama' }}
           OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
           COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
           KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
@@ -53,6 +54,10 @@ jobs:
           ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
           SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
           PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          SATURN_OLLAMA_URL: ${{ secrets.SATURN_OLLAMA_URL || '' }}
+          CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
           CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
         run: |
           python scripts/select_model.py > output.log
@@ -94,6 +99,9 @@ jobs:
           sleep 5
           ollama pull ${{ env.SELECTED_MODEL }}
 
+      - name: Auto-Test the CI Pipeline (Ephemeral Venv)
+        run: bash run-tests.sh
+
       - name: Run Autonomous Issue Resolver
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,6 +112,7 @@ jobs:
           OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
           PROJECT_TYPE: "existing"
           GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'ollama' }}
           OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
           COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
           KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
@@ -114,6 +123,10 @@ jobs:
           ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
           SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
           PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          SATURN_OLLAMA_URL: ${{ secrets.SATURN_OLLAMA_URL || '' }}
+          CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
           CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
         run: python scripts/ai_pipeline.py --issue
 

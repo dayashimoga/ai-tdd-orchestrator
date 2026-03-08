@@ -34,6 +34,7 @@ jobs:
         id: gpu_scan
         env:
           GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'ollama' }}
           OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
           COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
           KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
@@ -44,6 +45,10 @@ jobs:
           ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
           SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
           PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          SATURN_OLLAMA_URL: ${{ secrets.SATURN_OLLAMA_URL || '' }}
+          CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
           CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
         run: |
           python scripts/select_model.py > output.log
@@ -70,7 +75,7 @@ jobs:
 
       - name: Cache Ollama Models
         if: env.LOCAL_OLLAMA_REQUIRED == 'true'
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.ollama/models
           key: ${{ runner.os }}-ollama-models
@@ -93,6 +98,7 @@ jobs:
           REPO_NAME: ${{ github.repository }}
           OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
           GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'ollama' }}
           OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
           COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
           KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
@@ -103,6 +109,10 @@ jobs:
           ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
           SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
           PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          SATURN_OLLAMA_URL: ${{ secrets.SATURN_OLLAMA_URL || '' }}
+          CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
           CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
           USER_HINT: ${{ github.event.comment.body }}
         run: python scripts/ai_pipeline.py --resume-with-hint

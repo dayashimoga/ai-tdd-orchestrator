@@ -1,13 +1,15 @@
 """LLM Provider Router — Provider-agnostic LLM interface.
 
-Supports: Ollama (default), OpenAI, Anthropic, Google Gemini.
+Supports: Ollama (default), OpenAI, Anthropic, Google Gemini, Groq, Cerebras.
 
 Configuration via environment variables:
-    LLM_PROVIDER: "ollama" | "openai" | "anthropic" | "gemini"  (default: "ollama")
+    LLM_PROVIDER: "ollama" | "openai" | "anthropic" | "gemini" | "groq" | "cerebras"  (default: "ollama")
     OLLAMA_URL / OLLAMA_MODEL: for Ollama
     OPENAI_API_KEY / OPENAI_MODEL: for OpenAI (default model: gpt-4o-mini)
     ANTHROPIC_API_KEY / ANTHROPIC_MODEL: for Anthropic (default model: claude-3-haiku-20240307)
     GOOGLE_API_KEY / GOOGLE_MODEL: for Google Gemini (default model: gemini-1.5-flash)
+    GROQ_API_KEY / GROQ_MODEL: for Groq (default model: llama-3.3-70b-versatile)
+    CEREBRAS_API_KEY / CEREBRAS_MODEL: for Cerebras (default model: llama3.1-70b)
 """
 import json
 import os
@@ -119,10 +121,13 @@ def _ollama_generate(prompt: str, model: str, base_url: str,
         return response.json().get("response", "")
 
 
-def _openai_generate(prompt: str, model: str, api_key: str,
-                     temperature: float, stream: bool) -> str:
-    """Generate via OpenAI Chat Completions API."""
-    session = _get_session()
+def _openai_compatible_generate(prompt: str, model: str, api_key: str,
+                                 base_url: str, temperature: float,
+                                 stream: bool) -> str:
+    """Generate via any OpenAI-compatible Chat Completions API.
+
+    Works with: OpenAI, Groq, Cerebras, Together.ai, Anyscale, etc.
+    """
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -134,7 +139,7 @@ def _openai_generate(prompt: str, model: str, api_key: str,
         "stream": stream,
     }
     response = _retry_request(
-        "POST", "https://api.openai.com/v1/chat/completions",
+        "POST", f"{base_url}/chat/completions",
         headers=headers, json=payload, timeout=300, stream=stream,
     )
 
@@ -158,6 +163,33 @@ def _openai_generate(prompt: str, model: str, api_key: str,
         return "".join(chunks)
     else:
         return response.json()["choices"][0]["message"]["content"]
+
+
+def _openai_generate(prompt: str, model: str, api_key: str,
+                     temperature: float, stream: bool) -> str:
+    """Generate via OpenAI Chat Completions API."""
+    return _openai_compatible_generate(
+        prompt, model, api_key, "https://api.openai.com/v1",
+        temperature, stream,
+    )
+
+
+def _groq_generate(prompt: str, model: str, api_key: str,
+                   temperature: float, stream: bool) -> str:
+    """Generate via Groq Cloud API (OpenAI-compatible, ~500 tok/s)."""
+    return _openai_compatible_generate(
+        prompt, model, api_key, "https://api.groq.com/openai/v1",
+        temperature, stream,
+    )
+
+
+def _cerebras_generate(prompt: str, model: str, api_key: str,
+                       temperature: float, stream: bool) -> str:
+    """Generate via Cerebras Inference API (OpenAI-compatible, ~2000 tok/s)."""
+    return _openai_compatible_generate(
+        prompt, model, api_key, "https://api.cerebras.ai/v1",
+        temperature, stream,
+    )
 
 
 def _anthropic_generate(prompt: str, model: str, api_key: str,
@@ -270,6 +302,26 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
                 print(f"🤖 [{provider.upper()}] model={model}")
                 return _gemini_generate(prompt, model, api_key, temperature, stream)
 
+        if provider == "groq":
+            api_key = os.getenv("GROQ_API_KEY", "")
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            if not api_key:
+                print("❌ GROQ_API_KEY not set. Falling back to Ollama.")
+                provider = "ollama"
+            else:
+                print(f"🤖 [{provider.upper()}] model={model} (~500 tok/s)")
+                return _groq_generate(prompt, model, api_key, temperature, stream)
+
+        if provider == "cerebras":
+            api_key = os.getenv("CEREBRAS_API_KEY", "")
+            model = os.getenv("CEREBRAS_MODEL", "llama3.1-70b")
+            if not api_key:
+                print("❌ CEREBRAS_API_KEY not set. Falling back to Ollama.")
+                provider = "ollama"
+            else:
+                print(f"🤖 [{provider.upper()}] model={model} (~2000 tok/s)")
+                return _cerebras_generate(prompt, model, api_key, temperature, stream)
+
         # Default: Ollama — use lazy platform detection (PS2)
         ollama_url = os.getenv("OLLAMA_URL") or ""
         if not ollama_url:
@@ -296,5 +348,9 @@ def get_provider_info() -> str:
         return f"Anthropic ({os.getenv('ANTHROPIC_MODEL', 'claude-3-haiku-20240307')})"
     elif provider == "gemini":
         return f"Google Gemini ({os.getenv('GOOGLE_MODEL', 'gemini-1.5-flash')})"
+    elif provider == "groq":
+        return f"Groq ({os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')})"
+    elif provider == "cerebras":
+        return f"Cerebras ({os.getenv('CEREBRAS_MODEL', 'llama3.1-70b')})"
     else:
         return f"Ollama ({os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:3b')})"

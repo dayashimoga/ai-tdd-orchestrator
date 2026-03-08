@@ -7,7 +7,8 @@ import pytest
 import requests
 from scripts.llm_router import (
     _ollama_generate, _openai_generate, _anthropic_generate,
-    _gemini_generate, generate, get_provider_info,
+    _gemini_generate, _groq_generate, _cerebras_generate,
+    _openai_compatible_generate, generate, get_provider_info,
     _get_session, _retry_request,
 )
 import scripts.llm_router as llm_router
@@ -207,6 +208,59 @@ class TestGeminiGenerate:
         assert result == "OK"
 
 
+class TestGroqGenerate:
+    @patch("scripts.llm_router._retry_request")
+    def test_groq_no_stream(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "Groq response"}}]
+        }
+        mock_retry.return_value = mock_resp
+        result = _groq_generate("test", "llama-3.3-70b-versatile", "gsk_key", 0.2, False)
+        assert result == "Groq response"
+        # Verify correct API endpoint
+        call_args = mock_retry.call_args
+        assert "groq.com" in call_args[0][1]
+
+    @patch("scripts.llm_router._retry_request")
+    def test_groq_stream(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.iter_lines.return_value = [
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "Fast "}}]}).encode(),
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "inference"}}]}).encode(),
+            b"data: [DONE]"
+        ]
+        mock_retry.return_value = mock_resp
+        result = _groq_generate("test", "mixtral-8x7b", "gsk_key", 0.2, True)
+        assert result == "Fast inference"
+
+
+class TestCerebrasGenerate:
+    @patch("scripts.llm_router._retry_request")
+    def test_cerebras_no_stream(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "Cerebras response"}}]
+        }
+        mock_retry.return_value = mock_resp
+        result = _cerebras_generate("test", "llama3.1-70b", "csk_key", 0.2, False)
+        assert result == "Cerebras response"
+        call_args = mock_retry.call_args
+        assert "cerebras.ai" in call_args[0][1]
+
+    @patch("scripts.llm_router._retry_request")
+    def test_cerebras_stream(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.iter_lines.return_value = [
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "Ultra "}}]}).encode(),
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "fast"}}]}).encode(),
+            b"data: [DONE]"
+        ]
+        mock_retry.return_value = mock_resp
+        result = _cerebras_generate("test", "llama3.1-70b", "csk_key", 0.2, True)
+        assert result == "Ultra fast"
+
+
 class TestGenerate:
     @patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=False)
     @patch("scripts.llm_router._retry_request")
@@ -318,4 +372,66 @@ class TestGetProviderInfo:
         llm_router.LLM_PROVIDER = "unknown"
         info = llm_router.get_provider_info()
         assert "Ollama" in info
+        llm_router.LLM_PROVIDER = "ollama"
+
+    def test_groq_info(self):
+        llm_router.LLM_PROVIDER = "groq"
+        info = llm_router.get_provider_info()
+        assert "Groq" in info
+        llm_router.LLM_PROVIDER = "ollama"
+
+    def test_cerebras_info(self):
+        llm_router.LLM_PROVIDER = "cerebras"
+        info = llm_router.get_provider_info()
+        assert "Cerebras" in info
+        llm_router.LLM_PROVIDER = "ollama"
+
+
+class TestGenerateGroqCerebras:
+    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}, clear=False)
+    @patch("scripts.llm_router._retry_request")
+    def test_generate_groq(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "Groq via router"}}]
+        }
+        mock_retry.return_value = mock_resp
+        llm_router.LLM_PROVIDER = "groq"
+        result = llm_router.generate("test", stream=False)
+        assert result == "Groq via router"
+        llm_router.LLM_PROVIDER = "ollama"
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False)
+    @patch("scripts.llm_router._retry_request")
+    def test_generate_groq_fallback(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama"}).encode()]
+        mock_retry.return_value = mock_resp
+        llm_router.LLM_PROVIDER = "groq"
+        result = llm_router.generate("test", stream=True)
+        assert result == "Ollama"
+        llm_router.LLM_PROVIDER = "ollama"
+
+    @patch.dict(os.environ, {"CEREBRAS_API_KEY": "csk_test"}, clear=False)
+    @patch("scripts.llm_router._retry_request")
+    def test_generate_cerebras(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "Cerebras via router"}}]
+        }
+        mock_retry.return_value = mock_resp
+        llm_router.LLM_PROVIDER = "cerebras"
+        result = llm_router.generate("test", stream=False)
+        assert result == "Cerebras via router"
+        llm_router.LLM_PROVIDER = "ollama"
+
+    @patch.dict(os.environ, {"CEREBRAS_API_KEY": ""}, clear=False)
+    @patch("scripts.llm_router._retry_request")
+    def test_generate_cerebras_fallback(self, mock_retry):
+        mock_resp = MagicMock()
+        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama"}).encode()]
+        mock_retry.return_value = mock_resp
+        llm_router.LLM_PROVIDER = "cerebras"
+        result = llm_router.generate("test", stream=True)
+        assert result == "Ollama"
         llm_router.LLM_PROVIDER = "ollama"
