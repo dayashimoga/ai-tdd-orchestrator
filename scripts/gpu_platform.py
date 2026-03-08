@@ -1,7 +1,8 @@
 """GPU Platform Intelligence — Auto-detection with health-check failover.
 
 Supports: Google Colab, Kaggle, Vast.ai, RunPod, Lightning.ai, HuggingFace,
-Oracle Cloud, local Ollama, and any custom endpoint.
+Oracle Cloud, Saturn Cloud, Google Cloud Shell, GitHub Codespaces,
+Groq (free API), Cerebras (free API), local Ollama, and any custom endpoint.
 
 FAILOVER: If the primary GPU endpoint is down, automatically tries the next
 configured platform in priority order.
@@ -64,11 +65,46 @@ PLATFORMS: Dict[str, Dict] = {
         "gpu": "Various (free tier)",
     },
     "oracle": {
-        "name": "Oracle Cloud (Always Free A10)",
+        "name": "Oracle Cloud (A10 via Terraform)",
         "env_var": "ORACLE_OLLAMA_URL",
-        "description": "Always-free tier with A10 GPU (limited availability)",
+        "description": "SGD 400 trial credits, A10 GPU, auto-provisioned via Terraform",
         "free": True,
         "gpu": "NVIDIA A10 (24GB)",
+    },
+    "saturn": {
+        "name": "Saturn Cloud",
+        "env_var": "SATURN_OLLAMA_URL",
+        "description": "30 free GPU hours/month, T4 GPU, persistent environment",
+        "free": True,
+        "gpu": "NVIDIA T4 (15GB)",
+    },
+    "cloudshell": {
+        "name": "Google Cloud Shell",
+        "env_var": "CLOUDSHELL_OLLAMA_URL",
+        "description": "Free e2-small VM (no GPU but free CPU), 5GB persistent disk",
+        "free": True,
+        "gpu": "CPU only (free)",
+    },
+    "codespaces": {
+        "name": "GitHub Codespaces",
+        "env_var": "CODESPACES_OLLAMA_URL",
+        "description": "60 free core-hours/month, up to 4-core VM, no GPU",
+        "free": True,
+        "gpu": "CPU only (4-core)",
+    },
+    "groq": {
+        "name": "Groq Cloud (Free API)",
+        "env_var": "GROQ_API_KEY",
+        "description": "Free tier: 30 req/min, Llama/Mixtral/Gemma models, ultra-fast inference",
+        "free": True,
+        "gpu": "Groq LPU (cloud API)",
+    },
+    "cerebras": {
+        "name": "Cerebras Inference (Free API)",
+        "env_var": "CEREBRAS_API_KEY",
+        "description": "Free tier: Llama 3.1 70B at ~2000 tok/s, OpenAI-compatible API",
+        "free": True,
+        "gpu": "Cerebras WSE (cloud API)",
     },
     "vastai": {
         "name": "Vast.ai (RTX 3090/4090)",
@@ -95,10 +131,13 @@ PLATFORMS: Dict[str, Dict] = {
     },
 }
 
-# Failover priority: free platforms first, then paid
+# Failover priority: free GPU platforms first, free CPU second, then paid
 FAILOVER_ORDER: List[str] = [
     "colab", "kaggle", "lightning", "huggingface", "sagemaker",
-    "paperspace", "oracle", "vastai", "runpod", "custom",
+    "paperspace", "saturn", "oracle",
+    "groq", "cerebras",          # Free LLM APIs (no Ollama needed)
+    "cloudshell", "codespaces",  # Free CPU-only fallbacks
+    "vastai", "runpod", "custom",
 ]
 
 

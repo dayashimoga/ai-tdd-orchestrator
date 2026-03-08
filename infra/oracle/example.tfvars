@@ -19,3 +19,9 @@ budget_limit_sgd = 50   # Block provisioning if credits < SGD 50
 
 # Security — RESTRICT TO YOUR IP
 allowed_cidr = "0.0.0.0/0"  # Change to "YOUR.IP.ADDR.ESS/32"
+
+# Budget & Alerts (optional but recommended)
+tenancy_ocid  = "ocid1.tenancy.oc1..your_tenancy_id"
+create_budget = true      # Set to true to auto-create budget with alerts
+budget_amount = 50        # Monthly budget in USD
+alert_email   = "dayashm@gmail.com"  # Budget alert recipient

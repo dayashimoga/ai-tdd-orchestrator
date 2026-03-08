@@ -60,3 +60,31 @@ variable "allowed_cidr" {
   type        = string
   default     = "0.0.0.0/0"  # Restrict to your IP in production
 }
+
+# ---------------------------------------------------------------------------
+# Budget & Tagging Variables
+# ---------------------------------------------------------------------------
+
+variable "tenancy_ocid" {
+  description = "OCI tenancy OCID (required for budget creation)"
+  type        = string
+  default     = ""
+}
+
+variable "create_budget" {
+  description = "Whether to create an OCI budget with alert rules"
+  type        = bool
+  default     = false  # Set to true once tenancy_ocid is configured
+}
+
+variable "budget_amount" {
+  description = "Monthly budget amount in USD"
+  type        = number
+  default     = 50
+}
+
+variable "alert_email" {
+  description = "Email address for budget alerts"
+  type        = string
+  default     = ""
+}

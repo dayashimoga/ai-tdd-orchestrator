@@ -1,228 +1,159 @@
-# GPU & Environment Configuration Guide
+# GPU Setup Guide — AI TDD Orchestrator
 
-Complete step-by-step guide for configuring the AI TDD Orchestrator, including all GPU platforms, GitHub secrets, and environment variables.
+Complete guide to setting up free GPU resources for the AI TDD Orchestrator.
 
----
+## Platform Overview
 
-## 1. GitHub Repository Secrets
+### Free GPU Platforms (Ollama-compatible)
 
-Navigate to **Settings → Secrets and variables → Actions → New repository secret** in your orchestrator repo.
+| Platform | GPU | Free Limit | Setup Effort |
+|----------|-----|-----------|--------------|
+| **Google Colab** | T4 (15GB) | Unlimited sessions, ~4-12 hrs each | ⭐ Easy |
+| **Kaggle** | P100/T4 (16GB) | 30 GPU hrs/week | ⭐ Easy |
+| **Saturn Cloud** | T4 (15GB) | 30 GPU hrs/month | ⭐⭐ Medium |
+| **Lightning.ai** | T4/A10G | 22 GPU hrs/month | ⭐⭐ Medium |
+| **HuggingFace Spaces** | T4 (shared) | Free for public spaces | ⭐⭐ Medium |
+| **SageMaker Studio Lab** | T4 (15GB) | ~4 hrs/session, no CC needed | ⭐⭐ Medium |
+| **Oracle Cloud** | A10 (24GB) | SGD 400 trial credits | ⭐⭐⭐ Setup needed |
 
-### Required Secrets
+### Free LLM APIs (No Ollama needed — direct API)
 
-| Secret Name | Purpose | Example Value |
-|---|---|---|
-| `TARGET_REPO_TOKEN` | GitHub PAT with `repo` scope for creating/pushing to target repos | `ghp_xxxxxxxxxxxx` |
+| Platform | Models | Free Limit | Speed |
+|----------|--------|-----------|-------|
+| **Groq** | Llama 3, Mixtral, Gemma | 30 req/min, 14,400 req/day | ~500 tok/s |
+| **Cerebras** | Llama 3.1 70B | Free tier, rate-limited | ~2,000 tok/s |
 
-### Optional: GPU Platform Secrets
+### Free CPU-Only Fallbacks
 
-Set **one or more** of these to route LLM inference to a free GPU. The pipeline tries them in priority order and **automatically falls back** to the next if one is down.
-
-| Priority | Secret Name | Platform | Free GPU Hours | GPU Hardware |
-|---|---|---|---|---|
-| 1 | `COLAB_OLLAMA_URL` | Google Colab | ~15-30 hrs/week | NVIDIA T4 (15GB) |
-| 2 | `KAGGLE_OLLAMA_URL` | Kaggle Kernels | 30 hrs/week | NVIDIA P100 (16GB) |
-| 3 | `LIGHTNING_OLLAMA_URL` | Lightning.ai | 22 hrs/month | T4/A10G |
-| 4 | `SAGEMAKER_OLLAMA_URL` | AWS SageMaker Lab | ~4 hrs/session | NVIDIA T4 (15GB) |
-| 5 | `PAPERSPACE_OLLAMA_URL` | Gradient/Paperspace | Limited free tier | Various |
-| 6 | `ORACLE_OLLAMA_URL` | Oracle Cloud Always-Free | Unlimited (if available) | NVIDIA A10 (24GB) |
-| — | `VASTAI_OLLAMA_URL` | Vast.ai (Paid) | Pay-per-use | RTX 3090/4090 (24GB) |
-| — | `RUNPOD_OLLAMA_URL` | RunPod (Paid) | Pay-per-use | A40/A100 (48-80GB) |
-| — | `CUSTOM_OLLAMA_URL` | Any custom endpoint | — | User-defined |
-| — | `OLLAMA_URL` | Direct override | — | Skips auto-detection |
-
-### Other Optional Secrets
-
-| Secret Name | Purpose | Default |
-|---|---|---|
-| `GPU_PLATFORM` | Force a specific platform (skip auto-detect) | `auto` |
-| `OLLAMA_MODEL` | Override the model used for code generation | Auto-selected by RAM |
-| `OLLAMA_NUM_CTX` | Context window size (tokens) | `8192` |
+| Platform | vCPUs/RAM | Free Limit |
+|----------|-----------|-----------|
+| **Google Cloud Shell** | e2-small (0.5 vCPU, 2GB) | 50 hrs/week, 5GB persistent |
+| **GitHub Codespaces** | Up to 4 cores, 16GB RAM | 60 core-hours/month |
 
 ---
 
-## 2. GPU Platform Setup (Step-by-Step)
+## Quick Start
 
-### Platform A: Google Colab (Recommended Starter)
+### 1. Google Colab (Recommended — easiest)
 
-**Free Tier:** ~15-30 GPU hours/week, T4 GPU (15GB VRAM)
-
-1. Get a **free ngrok account** at [dashboard.ngrok.com](https://dashboard.ngrok.com) and copy your auth token
-2. Open [Google Colab](https://colab.research.google.com)
-3. Click **File → Upload notebook** → upload `gpu-notebooks/colab_gpu_server.ipynb`
-4. Select **Runtime → Change runtime type → T4 GPU**
-5. Click **Runtime → Run all**
-6. In **Cell 4**, paste your ngrok auth token in the `NGROK_TOKEN` variable
-7. Copy the printed public URL (e.g., `https://abc123.ngrok-free.app`)
-8. Add as GitHub secret: **Name:** `COLAB_OLLAMA_URL` → **Value:** the URL
-
-> **Note:** Keep the Colab tab open with Cell 5 (keep-alive) running while the pipeline executes. Free tier gives ~4-12 hours per session.
-
----
-
-### Platform B: Kaggle Kernels (Best Free Quota)
-
-**Free Tier:** 30 GPU hours/week, P100 GPU (16GB VRAM)
-
-**Prerequisites:** Phone verification required at [kaggle.com/settings](https://www.kaggle.com/settings)
-
-1. Go to [kaggle.com/code](https://www.kaggle.com/code) → **New Notebook**
-2. Click **File → Import Notebook** → upload `gpu-notebooks/kaggle_gpu_server.ipynb`
-3. Go to **Settings (gear icon)** → **Accelerator → GPU P100**
+```
+1. Open gpu-notebooks/colab_ollama.ipynb in Google Colab
+2. Runtime → Change runtime type → T4 GPU
+3. Set NGROK_AUTH_TOKEN (get free at https://ngrok.com)
 4. Run all cells
-5. In **Cell 3**, paste your ngrok auth token
-6. Copy the printed public URL
-7. Add as GitHub secret: **Name:** `KAGGLE_OLLAMA_URL` → **Value:** the URL
-
-> **Note:** If GPU options are greyed out, verify your phone number first at [kaggle.com/settings](https://www.kaggle.com/settings).
-
----
-
-### Platform C: Lightning.ai
-
-**Free Tier:** 22 GPU hours/month, T4/A10G
-
-1. Sign up at [lightning.ai](https://lightning.ai)
-2. Create a new **Studio** with GPU runtime
-3. Open a terminal and run:
-   ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
-   OLLAMA_HOST=0.0.0.0 ollama serve &
-   sleep 5
-   ollama pull qwen2.5-coder:7b
-   pip install pyngrok
-   python -c "from pyngrok import ngrok; ngrok.set_auth_token('YOUR_TOKEN'); t=ngrok.connect(11434); print(t.public_url)"
-   ```
-4. Copy the URL and add as GitHub secret: `LIGHTNING_OLLAMA_URL`
-
----
-
-### Platform D: Amazon SageMaker Studio Lab
-
-**Free Tier:** Free T4 GPU, ~4 hours per session, no credit card required
-
-1. Sign up at [studiolab.sagemaker.aws](https://studiolab.sagemaker.aws) (approval may take 1-5 days)
-2. Launch a **GPU runtime**
-3. Open a terminal and run the same commands as Lightning.ai above
-4. Add the URL as GitHub secret: `SAGEMAKER_OLLAMA_URL`
-
----
-
-### Platform E: Oracle Cloud (Always-Free A10)
-
-**Free Tier:** Always-free VM with A10 GPU (24GB VRAM) — limited regional availability
-
-1. Sign up at [cloud.oracle.com](https://cloud.oracle.com) (free tier, credit card required for verification only)
-2. Create a **VM.GPU.A10.1** compute instance (check availability in your region)
-3. SSH into the instance:
-   ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
-   OLLAMA_HOST=0.0.0.0 ollama serve &
-   sleep 5
-   ollama pull qwen2.5-coder:14b  # A10 can run 14b!
-   ```
-4. Open firewall port 11434 in the Oracle Cloud security list
-5. Add as GitHub secret: `ORACLE_OLLAMA_URL` → `http://YOUR_PUBLIC_IP:11434`
-
-> **Best option if available** — always-on, no session limits, and A10 can run the 14b model for best code quality.
-
----
-
-### Platform F: Gradient by Paperspace
-
-**Free Tier:** Free GPU notebooks with limited hours
-
-1. Sign up at [gradient.run](https://gradient.run)
-2. Create a new notebook with free GPU
-3. Follow the same Ollama + ngrok setup as above
-4. Add as GitHub secret: `PAPERSPACE_OLLAMA_URL`
-
----
-
-### Paid Options (Low Cost)
-
-#### Vast.ai ($0.15-0.30/hr)
-1. Sign up at [vast.ai](https://vast.ai), add $5 credit
-2. Search for **RTX 3090** instances → Deploy **ollama/ollama** Docker image
-3. SSH in: `ollama pull qwen2.5-coder:7b`
-4. Add as GitHub secret: `VASTAI_OLLAMA_URL` → `http://INSTANCE_IP:11434`
-
-#### RunPod ($0.39/hr)
-1. Sign up at [runpod.io](https://runpod.io)
-2. Deploy a **Serverless** endpoint with Ollama template
-3. Add as GitHub secret: `RUNPOD_OLLAMA_URL`
-
----
-
-## 3. Failover Behavior
-
-When multiple GPU secrets are configured, the pipeline performs **health checks** and automatically fails over:
-
-```
-Pipeline starts
-  → Tries COLAB_OLLAMA_URL (priority 1)... Health check passes → Uses Colab
-  
-If Colab is DOWN (expired/disconnected):
-  → Tries KAGGLE_OLLAMA_URL (priority 2)... UP → Uses Kaggle
-
-If both Colab AND Kaggle are DOWN:
-  → Tries LIGHTNING_OLLAMA_URL (priority 3)... etc.
-
-If ALL remote GPUs are DOWN:
-  → Falls back to local Ollama on the GitHub runner (CPU inference)
+5. Copy the COLAB_OLLAMA_URL output
+6. Set as environment variable or GitHub Secret
 ```
 
-**Combined free GPU time** with all platforms configured: **~70-100+ hours/week**.
+### 2. Kaggle (30 free GPU hrs/week)
 
----
+```
+1. Upload gpu-notebooks/kaggle_ollama.ipynb to Kaggle
+2. Settings → Accelerator → GPU T4 x2
+3. Set NGROK_AUTH_TOKEN
+4. Run all cells
+5. Copy the KAGGLE_OLLAMA_URL output
+```
 
-## 4. Model Recommendations
+### 3. Oracle Cloud (A10 GPU via Terraform)
 
-| GPU VRAM | Recommended Model | Set via `OLLAMA_MODEL` secret | Quality |
-|---|---|---|---|
-| CPU only (no GPU) | `qwen2.5-coder:3b` | Auto-selected | Basic |
-| 8GB | `qwen2.5-coder:7b` | `qwen2.5-coder:7b` | Good |
-| 15-16GB (T4/P100) | `qwen2.5-coder:7b` | `qwen2.5-coder:7b` | **Sweet spot** |
-| 24GB (A10/RTX 3090) | `qwen2.5-coder:14b` | `qwen2.5-coder:14b` | Great |
-| 48GB+ (A100) | `qwen2.5-coder:32b` | `qwen2.5-coder:32b` | Excellent |
-
----
-
-## 5. Environment Variables Reference
-
-All configurable via GitHub secrets or workflow `env:` block:
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `OLLAMA_URL` | Direct Ollama API endpoint (overrides auto-detect) | Auto-detected |
-| `OLLAMA_MODEL` | Model to use for code generation | Auto-selected by RAM |
-| `OLLAMA_NUM_CTX` | Context window token limit | `8192` |
-| `GPU_PLATFORM` | Force a platform: `colab`, `kaggle`, `auto`, etc. | `auto` |
-| `TARGET_REPO` | Target repository (`user/repo`) | Workflow input |
-| `PROJECT_TYPE` | `new` (create repo) or `existing` (clone repo) | Workflow input |
-| `TARGET_REPO_TOKEN` | PAT for target repo operations | `GITHUB_TOKEN` |
-| `GITHUB_TOKEN` | Auto-provided by GitHub Actions | Auto |
-| `LOCAL_MODE` | Set to `true` for local Docker execution | `false` |
-| `USER_HINT` | Human guidance for `--resume-with-hint` | From PR comment |
-
----
-
-## 6. Verification
-
-### Test GPU Connection Locally
 ```bash
-python scripts/gpu_platform.py
-```
-Output:
-```
-[GPU] Trying Google Colab (T4 via ngrok)...
-[GPU] Connected: Google Colab (T4 via ngrok) (NVIDIA T4 (15GB))
-Selected: colab -> https://abc123.ngrok-free.app/api/generate
+# One-time setup
+cd infra/oracle
+cp example.tfvars terraform.tfvars
+# Edit terraform.tfvars with your compartment_id
+
+# Each session
+./budget_check.sh          # Verify credits
+terraform init
+terraform apply -auto-approve
+# Use the OLLAMA_URL output
+# VM auto-shuts down after 2 hours
+
+# Manual cleanup
+terraform destroy -auto-approve
 ```
 
-### Test From GitHub Actions
-Trigger the workflow and check the logs. You should see:
+#### Budget Setup (Terraform-automated)
+Set these in `terraform.tfvars`:
+```hcl
+create_budget  = true
+tenancy_ocid   = "ocid1.tenancy.oc1..your_tenancy_id"
+budget_amount  = 50       # USD per month
+alert_email    = "your@email.com"
 ```
-[GPU] Trying Google Colab (T4 via ngrok)...
-[GPU] Connected: Google Colab (T4 via ngrok) (NVIDIA T4 (15GB))
+
+Terraform creates budget alerts at **50%**, **75%**, and **90%** automatically.
+
+All resources are tagged with `project = ai-tdd-orchestrator` for budget filtering.
+
+### 4. Groq API (Free, ultra-fast inference)
+
+```bash
+# Get free API key at https://console.groq.com
+export GROQ_API_KEY="gsk_your_key_here"
+export LLM_PROVIDER="groq"
 ```
+
+No GPU needed — Groq runs inference on their LPU cloud at ~500 tokens/sec.
+
+### 5. Cerebras API (Free, Llama 3.1 70B)
+
+```bash
+# Get free API key at https://cloud.cerebras.ai
+export CEREBRAS_API_KEY="your_key_here"
+export LLM_PROVIDER="cerebras"
+```
+
+---
+
+## Smart Scheduler
+
+Auto-selects the best available platform:
+
+```bash
+# Show all platform status
+python scripts/gpu_scheduler.py --status
+
+# Auto-select best free platform
+python scripts/gpu_scheduler.py
+
+# Auto-provision Oracle if needed
+python scripts/gpu_scheduler.py --provision
+
+# Destroy Oracle resources
+python scripts/gpu_scheduler.py --destroy
+```
+
+**Priority**: Colab → Kaggle → Lightning → HuggingFace → SageMaker → Saturn → Oracle → Groq → Cerebras → Cloud Shell → Codespaces → Local
+
+---
+
+## Credit Protection (Oracle Cloud)
+
+| Layer | Mechanism | Automated? |
+|-------|-----------|:----------:|
+| Budget alerts (50/75/90%) | Terraform `oci_budget_budget` | ✅ |
+| Resource tagging | `freeform_tags` on all resources | ✅ |
+| VM auto-shutdown | Cloud-init timer (default: 2 hrs) | ✅ |
+| Local auto-destroy | `auto_destroy.sh` runs `terraform destroy` | ✅ |
+| Pre-apply credit check | `budget_check.sh` blocks if low | ✅ |
+| Free trial safety | No charges after credits expire | ✅ |
+
+> **⚠️ NEVER upgrade your Oracle account to Pay-As-You-Go.** Keep it as Free Tier trial.
+
+---
+
+## Environment Variables Reference
+
+| Variable | Platform | Example |
+|----------|----------|---------|
+| `COLAB_OLLAMA_URL` | Google Colab | `https://abc123.ngrok.io` |
+| `KAGGLE_OLLAMA_URL` | Kaggle | `https://def456.ngrok.io` |
+| `ORACLE_OLLAMA_URL` | Oracle Cloud | `http://1.2.3.4:11434` |
+| `SATURN_OLLAMA_URL` | Saturn Cloud | `https://saturn.ngrok.io` |
+| `LIGHTNING_OLLAMA_URL` | Lightning.ai | `https://lit.ngrok.io` |
+| `HF_OLLAMA_URL` | HuggingFace | `https://hf-space.ngrok.io` |
+| `GROQ_API_KEY` | Groq (direct API) | `gsk_xxxx` |
+| `CEREBRAS_API_KEY` | Cerebras (direct API) | `csk_xxxx` |
+| `LLM_PROVIDER` | Provider selector | `ollama\|openai\|groq\|cerebras` |

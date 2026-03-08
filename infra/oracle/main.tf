@@ -31,6 +31,19 @@ provider "oci" {
 }
 
 # ---------------------------------------------------------------------------
+# Common Tags — Used by OCI Budgets for cost tracking
+# ---------------------------------------------------------------------------
+locals {
+  common_tags = {
+    "project"     = "ai-tdd-orchestrator"
+    "component"   = "ollama-gpu"
+    "environment" = "dev"
+    "managed-by"  = "terraform"
+    "auto-destroy" = "${var.max_hours}h"
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Data Sources
 # ---------------------------------------------------------------------------
 
@@ -57,18 +70,21 @@ resource "oci_core_vcn" "ollama_vcn" {
   compartment_id = var.compartment_id
   display_name   = "ollama-gpu-vcn"
   cidr_blocks    = ["10.0.0.0/16"]
+  freeform_tags  = local.common_tags
 }
 
 resource "oci_core_internet_gateway" "igw" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.ollama_vcn.id
   display_name   = "ollama-igw"
+  freeform_tags  = local.common_tags
 }
 
 resource "oci_core_route_table" "public_rt" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.ollama_vcn.id
   display_name   = "ollama-public-rt"
+  freeform_tags  = local.common_tags
 
   route_rules {
     destination       = "0.0.0.0/0"
@@ -80,6 +96,7 @@ resource "oci_core_security_list" "ollama_sl" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.ollama_vcn.id
   display_name   = "ollama-security-list"
+  freeform_tags  = local.common_tags
 
   # SSH
   ingress_security_rules {
@@ -115,6 +132,7 @@ resource "oci_core_subnet" "public_subnet" {
   display_name      = "ollama-public-subnet"
   route_table_id    = oci_core_route_table.public_rt.id
   security_list_ids = [oci_core_security_list.ollama_sl.id]
+  freeform_tags     = local.common_tags
 }
 
 # ---------------------------------------------------------------------------
@@ -126,6 +144,7 @@ resource "oci_core_instance" "ollama_gpu" {
   availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
   display_name        = "ollama-gpu-${formatdate("YYYYMMDD-hhmm", timestamp())}"
   shape               = var.gpu_shape
+  freeform_tags       = local.common_tags
 
   shape_config {
     ocpus         = var.gpu_ocpus
@@ -154,6 +173,67 @@ resource "oci_core_instance" "ollama_gpu" {
   lifecycle {
     ignore_changes = [display_name]
   }
+}
+
+# ---------------------------------------------------------------------------
+# Budget with Alert Rules — Auto-created for cost tracking
+# ---------------------------------------------------------------------------
+
+resource "oci_budget_budget" "gpu_budget" {
+  count = var.create_budget ? 1 : 0
+
+  compartment_id = var.tenancy_ocid
+  display_name   = "ai-tdd-gpu-budget"
+  description    = "Auto-managed budget for AI TDD Orchestrator GPU resources"
+
+  # Use tag-based targeting so it tracks only our resources
+  target_type = "TAG"
+  targets     = ["project.ai-tdd-orchestrator"]
+
+  # Budget amount and schedule
+  amount         = var.budget_amount
+  reset_period   = "MONTHLY"
+
+  freeform_tags = local.common_tags
+}
+
+# Budget alert at 50%
+resource "oci_budget_alert_rule" "alert_50" {
+  count = var.create_budget ? 1 : 0
+
+  budget_id    = oci_budget_budget.gpu_budget[0].id
+  display_name = "GPU Budget 50% Alert"
+  type         = "ACTUAL"
+  threshold      = 50
+  threshold_type = "PERCENTAGE"
+  recipients     = var.alert_email
+  message        = "AI TDD Orchestrator GPU budget has reached 50%. Consider using free platforms (Colab/Kaggle) to conserve credits."
+}
+
+# Budget alert at 75%
+resource "oci_budget_alert_rule" "alert_75" {
+  count = var.create_budget ? 1 : 0
+
+  budget_id    = oci_budget_budget.gpu_budget[0].id
+  display_name = "GPU Budget 75% Alert"
+  type         = "ACTUAL"
+  threshold      = 75
+  threshold_type = "PERCENTAGE"
+  recipients     = var.alert_email
+  message        = "AI TDD Orchestrator GPU budget at 75%. Reduce Oracle Cloud usage and prefer Colab/Kaggle."
+}
+
+# Budget alert at 90%
+resource "oci_budget_alert_rule" "alert_90" {
+  count = var.create_budget ? 1 : 0
+
+  budget_id    = oci_budget_budget.gpu_budget[0].id
+  display_name = "GPU Budget 90% CRITICAL Alert"
+  type         = "ACTUAL"
+  threshold      = 90
+  threshold_type = "PERCENTAGE"
+  recipients     = var.alert_email
+  message        = "CRITICAL: AI TDD Orchestrator GPU budget at 90%! Stop Oracle Cloud usage immediately!"
 }
 
 # ---------------------------------------------------------------------------
