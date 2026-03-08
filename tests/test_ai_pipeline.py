@@ -812,3 +812,132 @@ class TestAIGenerateWithRouter(unittest.TestCase):
     def test_ai_generate_failure(self, mock_retry):
         result = ai_pipeline.ai_generate("test prompt")
         self.assertEqual(result, "")
+
+
+class TestInstallProjectDependencies(unittest.TestCase):
+    """Tests for the _install_project_dependencies function."""
+
+    def setUp(self):
+        ai_pipeline._deps_installed_hash = ""
+
+    @patch('os.path.exists', return_value=False)
+    def test_no_requirements_file(self, mock_exists):
+        ai_pipeline._install_project_dependencies("your_project")
+        # Should print info message and not crash
+
+    @patch('subprocess.run')
+    @patch('builtins.open', mock_open(read_data="flask>=3.0\npytest>=8.0\n"))
+    @patch('os.path.exists', return_value=True)
+    def test_install_success(self, mock_exists, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        ai_pipeline._deps_installed_hash = ""
+        ai_pipeline._install_project_dependencies("your_project")
+        mock_run.assert_called_once()
+
+    @patch('subprocess.run')
+    @patch('builtins.open', mock_open(read_data="flask>=3.0\npytest>=8.0\n"))
+    @patch('os.path.exists', return_value=True)
+    def test_install_caches_hash(self, mock_exists, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        ai_pipeline._deps_installed_hash = ""
+        ai_pipeline._install_project_dependencies("your_project")
+        first_hash = ai_pipeline._deps_installed_hash
+        self.assertNotEqual(first_hash, "")
+        # Second call should skip (cached)
+        mock_run.reset_mock()
+        ai_pipeline._install_project_dependencies("your_project")
+        mock_run.assert_not_called()
+
+    @patch('subprocess.run')
+    @patch('builtins.open', mock_open(read_data="flask>=3.0\n"))
+    @patch('os.path.exists', return_value=True)
+    def test_install_failure(self, mock_exists, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stderr="ERROR: bad package")
+        ai_pipeline._deps_installed_hash = ""
+        ai_pipeline._install_project_dependencies("your_project")
+        # Hash should NOT be cached on failure
+        self.assertEqual(ai_pipeline._deps_installed_hash, "")
+
+    @patch('subprocess.run', side_effect=Exception("pip exploded"))
+    @patch('builtins.open', mock_open(read_data="flask\n"))
+    @patch('os.path.exists', return_value=True)
+    def test_install_exception(self, mock_exists, mock_run):
+        ai_pipeline._deps_installed_hash = ""
+        ai_pipeline._install_project_dependencies("your_project")
+        # Should not crash
+
+
+class TestExtractModuleNotFound(unittest.TestCase):
+    """Tests for ModuleNotFoundError detection in extract_test_failures."""
+
+    def test_module_not_found_detected(self):
+        feedback = (
+            "ERRORS\n"
+            "ImportError while importing test module\n"
+            "E   ModuleNotFoundError: No module named 'flask'\n"
+            "short test summary info\n"
+            "ERROR your_project/tests/test_app.py\n"
+        )
+        result = ai_pipeline.extract_test_failures(feedback)
+        self.assertIn("ModuleNotFoundError", result)
+        self.assertIn("flask", result)
+        self.assertIn("requirements.txt", result)
+
+    def test_multiple_missing_modules(self):
+        feedback = (
+            "E   ModuleNotFoundError: No module named 'flask'\n"
+            "E   ModuleNotFoundError: No module named 'sqlalchemy'\n"
+        )
+        result = ai_pipeline.extract_test_failures(feedback)
+        self.assertIn("flask", result)
+        self.assertIn("sqlalchemy", result)
+
+    def test_no_module_error_not_triggered(self):
+        feedback = "FAILED test_app.py::test_main - AssertionError: 1 != 2\n"
+        result = ai_pipeline.extract_test_failures(feedback)
+        self.assertNotIn("ModuleNotFoundError", result)
+
+
+class TestExtractCoverageTable(unittest.TestCase):
+    """Tests for coverage table extraction in extract_test_failures."""
+
+    def test_coverage_table_parsed(self):
+        feedback = (
+            "FAIL Required test coverage of 90% not reached. Total coverage: 85%\n"
+            "Name                       Stmts   Miss  Cover   Missing\n"
+            "--------------------------------------------------------\n"
+            "app.py                        50     10    80%   15-20, 45-50\n"
+            "models.py                     30      5    83%   8-12\n"
+            "TOTAL                         80     15    81%\n"
+        )
+        result = ai_pipeline.extract_test_failures(feedback)
+        self.assertIn("app.py", result)
+        self.assertIn("15-20", result)
+        self.assertIn("models.py", result)
+        self.assertIn("COVERAGE DROPPED BELOW 90%", result)
+
+
+class TestGitRun(unittest.TestCase):
+    """Tests for the git_run utility wrapper."""
+
+    @patch('subprocess.run')
+    def test_git_run_default_cwd(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        ai_pipeline.git_run(["git", "status"])
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        self.assertEqual(kwargs["cwd"], "your_project")
+
+    @patch('subprocess.run')
+    def test_git_run_custom_cwd(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        ai_pipeline.git_run(["git", "log"], cwd="/tmp")
+        _, kwargs = mock_run.call_args
+        self.assertEqual(kwargs["cwd"], "/tmp")
+
+    @patch('subprocess.run')
+    def test_git_run_timeout_default(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        ai_pipeline.git_run(["git", "status"])
+        _, kwargs = mock_run.call_args
+        self.assertEqual(kwargs["timeout"], ai_pipeline.GIT_TIMEOUT)
