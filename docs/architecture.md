@@ -16,65 +16,78 @@ Key design principles:
 
 ```mermaid
 graph TD
-    subgraph Entry Points
-        GHA["GitHub Action / Local Docker"]
-        ISS["GitHub Issue Opened"]
-        PRC["PR Comment @ai-hint"]
+    %% Define Styles
+    classDef External fill:#2D3748,stroke:#4A5568,color:#fff
+    classDef Pipeline fill:#2B6CB0,stroke:#3182CE,color:#fff
+    classDef Agent fill:#C05621,stroke:#DD6B20,color:#fff
+    classDef Script fill:#2C7A7B,stroke:#319795,color:#fff
+    classDef Model classDef fill:#6B46C1,stroke:#805AD5,color:#fff
+
+    subgraph "External Triggers"
+        GHA["⚙️ GitHub Actions CI<br/>(Push/PR)"]:::External
+        ISS["💬 Issue Opened<br/>(#42 Bug...)"]:::External
+        MSG["🗣️ @ai-hint Comment<br/>In PR"]:::External
+        LOC["💻 Local Terminal<br/>--manual"]:::External
     end
 
-    subgraph Hardware Intelligence
-        SM["select_model.py<br/>RAM/VRAM Detection"]
-        GP["gpu_platform.py<br/>Platform Auto-Detection"]
+    subgraph "AI TDD Orchestrator"
+        AP["🚀 ai_pipeline.py"]:::Pipeline
+        
+        subgraph "Context Engine"
+            RM["📂 repo_map.py<br/>(AST/Regex + mtime Cache)"]:::Script
+            RAG["📚 rag_engine.py<br/>(TF-IDF Ref Docs)"]:::Script
+        end
+        
+        subgraph "Autonomous Agents"
+            PLN["🧠 Planner Agent<br/>(project_tasks.md)"]:::Agent
+            ENG["🛠️ Engineer Agent<br/>(Code & Tests)"]:::Agent
+        end
+        
+        subgraph "Testing & Rollback"
+            PYF["🧪 pytest-cov<br/>(Runs CI Suite)"]:::Pipeline
+            RBT["⏪ Git Rollback<br/>(reset & clean -fd)"]:::Pipeline
+        end
     end
 
-    subgraph Core Pipeline
-        AP["ai_pipeline.py<br/>TDD Orchestrator"]
-        RM["repo_map.py<br/>AST Repo Mapper"]
-        RAG["rag_engine.py<br/>TF-IDF RAG Engine"]
-        VQA["visual_qa.py<br/>Visual QA"]
+    subgraph "Hardware & LLM Routing"
+        GP["💻 gpu_platform.py<br/>(Auto VRAM Detect)"]:::Script
+        LR["🔀 llm_router.py<br/>(Failover Chain)"]:::Script
+        
+        OLL["Ollama<br/>(Local)"]:::Model
+        GRQ["Groq<br/>(~500 tok/s)"]:::Model
+        CER["Cerebras<br/>(~2000 tok/s)"]:::Model
+        OAI["OpenAI<br/>(GPT-4o)"]:::Model
     end
 
-    subgraph LLM Providers
-        LR["llm_router.py<br/>Provider Router"]
-        OLL["Ollama<br/>(Local/Cloud GPU)"]
-        OAI["OpenAI<br/>(GPT-4o)"]
-        ANT["Anthropic<br/>(Claude)"]
-        GEM["Google Gemini<br/>(gemini-1.5-flash)"]
-        GRQ["Groq<br/>(Llama 70B, ~500 tok/s)"]
-        CER["Cerebras<br/>(Llama 70B, ~2000 tok/s)"]
-    end
+    %% Flows from Triggers
+    GHA -->|"Review/Validate"| AP
+    ISS -->|"--issue"| AP
+    MSG -->|"--resume-with-hint"| AP
+    LOC -->|"--manual"| AP
 
-    subgraph External Services
-        GH["GitHub API<br/>(PyGithub)"]
-        WH["Webhook<br/>(Slack/Discord)"]
-        TF["Test Framework<br/>(pytest/jest/go/cargo)"]
-    end
-
-    GHA -->|"--manual / --issue"| AP
-    ISS -->|"issue-resolver.yml"| AP
-    PRC -->|"pr-chat.yml"| AP
-
-    SM -->|"Detects RAM/VRAM"| GP
-    GP -->|"Parallel Health Check"| OLL
-
-    AP -->|"Compressed AST Map"| RM
-    AP -->|"Reference Docs Context"| RAG
-    AP -->|"Code Generation"| LR
-    AP -->|"Visual Assessment"| VQA
-    AP -->|"Run Tests"| TF
-    AP -->|"Commit & Push"| GH
-    AP -->|"Notifications"| WH
-
-    LR -->|"Session Pooling"| OLL
-    LR -->|"Retry + Backoff"| OAI
-    LR -->|"Retry + Backoff"| ANT
-    LR -->|"Stream + Retry"| GEM
-    LR -->|"~500 tok/s Free"| GRQ
-    LR -->|"~2000 tok/s Free"| CER
-
-    VQA -->|"VLM Assessment"| OLL
-
-    RAG -->|"Reads"| REF["docs/reference/"]
+    %% Pipeline flow
+    AP -->|"1. Setup target repo"| PLN
+    PLN -->|"Initial Task List"| ENG
+    
+    ENG -.->|"Asks for specific files"| RM
+    RM -.->|"Provides Structural Map"| ENG
+    ENG -.->|"Lookup architecture"| RAG
+    
+    ENG -->|"Generates files"| PYF
+    
+    PYF -->|"Tests Pass?"| AP
+    PYF -.->|"<90% Coverage / Fails"| RBT
+    RBT -.->|"Injects Missing Lines/Logs"| ENG
+    
+    %% Routing
+    PLN -->|"Generate"| LR
+    ENG -->|"Generate"| LR
+    
+    LR -->|"Auto-Select Fastest/Free"| GP
+    LR --> OLL
+    LR --> GRQ
+    LR --> CER
+    LR --> OAI
 ```
 
 ---

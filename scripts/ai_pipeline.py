@@ -144,6 +144,30 @@ def extract_test_failures(raw_feedback: str) -> str:
         if in_failure and not line.strip():
             in_failure = False
 
+    # Extract Code Coverage Missing Lines
+    if "Required test coverage" in raw_feedback:
+        failures.append("\n⚠️ TESTS PASSED, BUT CODE COVERAGE DROPPED BELOW 90%!")
+        failures.append("You MUST add test cases for the following missing lines:")
+        in_coverage_table = False
+        for line in lines:
+            if line.startswith("Name ") and "Miss" in line and "Missing" in line:
+                in_coverage_table = True
+                continue
+            if line.startswith("-----") and in_coverage_table:
+                continue
+            if line.startswith("TOTAL") and in_coverage_table:
+                in_coverage_table = False
+                break
+            
+            if in_coverage_table and line.strip():
+                parts = line.split()
+                if len(parts) >= 5: # Name, Stmts, Miss, Cover, Missing...
+                    # If there's missing lines, they start from index 4 onwards
+                    file_name = parts[0]
+                    missing_lines = " ".join(parts[4:])
+                    if missing_lines:
+                        failures.append(f"  - {file_name}: lines {missing_lines}")
+
     if not failures:
         # Fallback: return truncated version
         return truncate_feedback(raw_feedback, max_lines=30)
@@ -795,27 +819,28 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                     print(f"🎯 PURPOSE: Fixing failing tests for '{base_task_description}' (retry #{retry_count})")
 
                     # TF2: Progressive retry strategy
+                    test_files_context = ""
+                    for root, _, files in os.walk("your_project"):
+                        for tf in files:
+                            if tf.startswith("test_") and (tf.endswith(".py") or tf.endswith(".js") or tf.endswith(".ts") or tf.endswith(".go")):
+                                test_path = os.path.join(root, tf)
+                                try:
+                                    with open(test_path, "r") as ff:
+                                        test_files_context += f"\n--- TEST FILE: {test_path} ---\n{ff.read()}\n"
+                                except Exception:
+                                    pass
+
                     if retry_count == 1:
                         task_prompt = (
                             f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
-                            f"Test failures:\n{concise_feedback}"
+                            f"Test failures:\n{concise_feedback}\n\n"
+                            f"Here are the test files for context:\n{test_files_context}"
                         )
                     elif retry_count == 2:
-                        # Include the full failing test file for more context
-                        test_files_context = ""
-                        for root, _, files in os.walk("your_project"):
-                            for tf in files:
-                                if tf.startswith("test_") and tf.endswith(".py"):
-                                    test_path = os.path.join(root, tf)
-                                    try:
-                                        with open(test_path, "r") as ff:
-                                            test_files_context += f"\n--- TEST FILE: {test_path} ---\n{ff.read()}\n"
-                                    except Exception:
-                                        pass
                         task_prompt = (
                             f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
-                            f"Test failures:\n{concise_feedback}\n\n"
-                            f"Here are the full test files so you can see exactly what is expected:\n{test_files_context}"
+                            f"Test failures persist:\n{concise_feedback}\n\n"
+                            f"Review the test files carefully to ensure you fix the exact assertion:\n{test_files_context}"
                         )
                     else:
                         # Retry 3+: Include conversation memory + expand context
@@ -824,7 +849,8 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                             f"FIX PREVIOUS BUG For Task: '{base_task_description}'.\n"
                             f"Test failures:\n{concise_feedback}\n\n"
                             f"IMPORTANT: Previous fix attempts did NOT work. Here is what was tried:\n{memory_text}\n\n"
-                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes."
+                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes.\n\n"
+                            f"Test files context:\n{test_files_context}"
                         )
 
                     # E3: Record what we're about to try

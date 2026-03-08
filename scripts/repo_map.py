@@ -3,6 +3,27 @@ import ast
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Optional
+import json
+
+# Minimal AST Cache: filepath -> {"mtime": float, "ast": str}
+_AST_CACHE = {}
+_CACHE_FILE = ".repo_map_cache.json"
+
+def _load_cache():
+    global _AST_CACHE
+    if not _AST_CACHE and os.path.exists(_CACHE_FILE):
+        try:
+            with open(_CACHE_FILE, "r", encoding="utf-8") as f:
+                _AST_CACHE = json.load(f)
+        except Exception:
+            _AST_CACHE = {}
+
+def _save_cache():
+    try:
+        with open(_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_AST_CACHE, f)
+    except Exception:
+        pass
 
 
 def _generate_python_map(file_path):
@@ -101,21 +122,33 @@ def _parse_file(file_path, file_name, rel_path,
     """Parses a single file and returns (header, content) or None.
 
     O3: Designed for use with ThreadPoolExecutor for parallel I/O.
+    O5: Implements mtime-based AST caching for speed optimization.
     """
+    try:
+        mtime = os.path.getmtime(file_path)
+    except OSError:
+        mtime = 0
+
+    cache_key = str(file_path)
+    if cache_key in _AST_CACHE:
+        cached = _AST_CACHE[cache_key]
+        if cached.get("mtime") == mtime and "content" in cached:
+            return (f"--- FILE: {rel_path} ---", cached["content"])
+
+    content = None
     if file_name.endswith(supported_ast_ext):
-        header = f"--- FILE: {rel_path} ---"
         ast_outline = _generate_python_map(file_path)
         content = ast_outline if ast_outline else "# No classes or functions defined."
-        return (header, content)
     elif file_name.endswith(js_ts_ext):
-        header = f"--- FILE: {rel_path} ---"
         js_outline = _generate_js_ts_map(file_path)
         content = js_outline if js_outline else "# No functions or classes found."
-        return (header, content)
     elif file_name.endswith(other_supported_ext):
-        header = f"--- FILE: {rel_path} ---"
         content = "# Non-python file. Full contents omitted from map."
-        return (header, content)
+
+    if content is not None:
+        _AST_CACHE[cache_key] = {"mtime": mtime, "content": content}
+        return (f"--- FILE: {rel_path} ---", content)
+    
     return None
 
 
@@ -138,6 +171,8 @@ def generate_repo_map(target_dir="your_project"):
     js_ts_ext = (".js", ".jsx", ".ts", ".tsx")
     other_supported_ext = (".go", ".html", ".css", ".md")
     all_supported = supported_ast_ext + js_ts_ext + other_supported_ext
+
+    _load_cache()
 
     # Phase 1: Collect all files to parse
     files_to_parse = []  # (file_path, file_name, rel_path)
@@ -200,6 +235,7 @@ def generate_repo_map(target_dir="your_project"):
         repo_map.append(content)
         repo_map.append("")  # spacer
 
+    _save_cache()
     return "\n".join(repo_map)
 
 if __name__ == "__main__":

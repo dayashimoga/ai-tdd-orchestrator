@@ -7,6 +7,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import scripts.repo_map as repo_map
 
 class TestRepoMap(unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        repo_map._AST_CACHE.clear()
+
     def test_generate_python_map_success(self):
         mock_code = "def my_func():\n    '''docstring'''\n    pass\n\nclass MyClass:\n    def method(self):\n        pass"
         with patch('builtins.open', mock_open(read_data=mock_code)):
