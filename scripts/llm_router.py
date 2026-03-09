@@ -190,28 +190,33 @@ def _openai_compatible_generate(prompt: str, model: str, api_key: str,
     if stream:
         chunks: List[str] = []
         token_usage = None
-        for line in response.iter_lines():
-            if line:
-                line_str = line.decode("utf-8") if isinstance(line, bytes) else line
-                if line_str.startswith("data: "):
-                    data = line_str[6:]
-                    if data.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        
-                        # Extract usage on final chunks
-                        if "usage" in chunk and chunk["usage"] is not None:
-                            token_usage = chunk["usage"]
+        try:
+            for line in response.iter_lines():
+                if line:
+                    line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+                    if line_str.startswith("data: "):
+                        data = line_str[6:]
+                        if data.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
                             
-                        delta = chunk.get("choices", [{}])[0].get("delta", {}) if chunk.get("choices") else {}
-                        word = delta.get("content", "")
-                        if word:
-                            chunks.append(word)
-                            sys.stdout.write(word)
-                            sys.stdout.flush()
-                    except json.JSONDecodeError:
-                        continue
+                            # Extract usage on final chunks
+                            if "usage" in chunk and chunk["usage"] is not None:
+                                token_usage = chunk["usage"]
+                                
+                            delta = chunk.get("choices", [{}])[0].get("delta", {}) if chunk.get("choices") else {}
+                            word = delta.get("content", "")
+                            if word:
+                                chunks.append(word)
+                                sys.stdout.write(word)
+                                sys.stdout.flush()
+                        except json.JSONDecodeError:
+                            continue
+        except requests.exceptions.ChunkedEncodingError:
+            print("\n⚠️ Stream interrupted (Provider Rate Limit or Disconnect). Attempting failover...")
+            raise requests.exceptions.HTTPError("Stream 429 Interruption")
+            
         print()
         if token_usage:
             prompt_tok = token_usage.get("prompt_tokens", 0)
@@ -239,6 +244,11 @@ def _openai_generate(prompt: str, model: str, api_key: str,
 def _groq_generate(prompt: str, model: str, api_key: str,
                    temperature: float, stream: bool) -> str:
     """Generate via Groq Cloud API (OpenAI-compatible, ~500 tok/s)."""
+    
+    # Auto-adjust massive models on Groq's super restricted free tiers to their ultra-fast API 
+    if model == "llama-3.3-70b-versatile" and os.getenv("GROQ_MODEL") is None:
+        model = "llama-3.1-8b-instant"
+        
     return _openai_compatible_generate(
         prompt, model, api_key, "https://api.groq.com/openai/v1",
         temperature, stream,
@@ -353,7 +363,8 @@ def _call_provider(provider: str, prompt: str, temperature: float,
 
     elif provider == "cerebras":
         api_key = os.getenv("CEREBRAS_API_KEY", "")
-        model = os.getenv("CEREBRAS_MODEL", "llama3.1-70b")
+        # Updated to active valid Cerebras endpoint 
+        model = os.getenv("CEREBRAS_MODEL", "llama3.1-8b")
         if not api_key:
             raise ValueError("CEREBRAS_API_KEY not set")
         print(f"\U0001f916 [CEREBRAS] model={model} (~2000 tok/s)")

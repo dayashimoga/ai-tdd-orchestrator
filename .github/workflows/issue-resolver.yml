@@ -58,6 +58,9 @@ jobs:
           CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
           CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
         run: |
           python scripts/select_model.py > output.log
@@ -155,6 +158,9 @@ jobs:
           CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
           CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
         run: python scripts/ai_pipeline.py --issue
 

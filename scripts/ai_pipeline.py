@@ -432,6 +432,12 @@ def setup_target_repository() -> None:
             with open(workflow_path, "w") as f:
                 f.write("name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: '3.11'\n      - run: pip install pytest pytest-cov\n      - run: pip install -r requirements.txt || true\n      - run: pytest --cov=./ --cov-fail-under=90")
 
+            # Create a robust .gitignore so we never commit __pycache__ or temporary AI logs
+            gitignore_path = os.path.join("your_project", ".gitignore")
+            if not os.path.exists(gitignore_path):
+                with open(gitignore_path, "w") as f:
+                    f.write("__pycache__/\n*.pyc\n.pytest_cache/\n.coverage\nhtmlcov/\ngenerated_code.txt\n")
+
             git_run(["git", "add", "."], check=True)
             
             # Briefly set author so initial commit works
@@ -464,6 +470,9 @@ def push_to_target_repository() -> None:
     try:
         git_run(["git", "config", "user.name", "ai-orchestrator"])
         git_run(["git", "config", "user.email", "actions@github.com"])
+        
+        # Aggressively purge any cached artifacts that might have slipped in before the gitignore
+        git_run(["git", "rm", "-r", "--cached", "__pycache__", "generated_code.txt"], check=False)
         git_run(["git", "add", "."], check=True)
 
         status = git_run(["git", "status", "--porcelain"], capture_output=True, text=True)
@@ -569,9 +578,14 @@ def update_task_plan(new_prompt: str) -> None:
         with open(req_path, "r", encoding="utf-8") as f:
             existing_reqs = f.read()
             
-        if new_prompt.strip() not in existing_reqs:
+        # Strip all whitespace to prevent \r\n vs \n from causing identical prompts to append endlessly
+        norm_new = "".join(new_prompt.split())
+        norm_old = "".join(existing_reqs.split())
+        if norm_new not in norm_old:
             with open(req_path, "a", encoding="utf-8") as f:
                 f.write(f"\n\n## New Requirements (Update)\n{new_prompt}\n")
+        else:
+            print("ℹ️ Requirements already exist in docs/requirements.md. Skipping duplication.")
     else:
         with open(req_path, "w", encoding="utf-8") as f:
             f.write(f"# Project Requirements\n\n{new_prompt}\n")

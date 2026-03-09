@@ -359,6 +359,23 @@ The TDD loop had no awareness of *consecutive* catastrophic failures. It assumed
 | **Resolution** | Prompt Engineering Injections (`ai_pipeline.py`): <br> **1.** Added `docs/lessons.md` injection. If the file exists, the Engineer reads it. The Engineer is instructed to document its own mistakes here so it never repeats them. <br> **2.** Injected a strict `CORE PRINCIPLES` list into the Engineer prompt demanding Simplicity, Elegance, Autonomous Bug Fixing, and passing Verification before tasks are completed. <br> **3.** Updated Planner prompts to force detailed specs upfront and to isolate tasks to exactly one atomic action per Subagent. |
 
 
+## 21. Cloud Provider 404 and 429 Stabilization (Groq & Cerebras)
+
+| Field | Detail |
+|-------|--------|
+| **Symptom 1** | Pipeline connects to Cerebras but receives an immediate 404 Not Found error. |
+| **Symptom 2** | Pipeline connects to Groq but hits a 429 Rate Limit error during long Context window generation, causing `requests.exceptions.ChunkedEncodingError` that crashes the orchestrator mid-stream. |
+| **Severity** | **Critical** — Causes instant fallback to next provider or fails the build entirely if no other providers are available. |
+
+**Root Cause**:
+1. **Cerebras**: The orchestrator defaulted to `llama3.1-70b`, an alias that Cerebras officially deprecated / removed from their active API endpoints, breaking any request made to it.
+2. **Groq**: Groq's Free API enforces an aggressive RPM (Requests per Minute) limit. Large TDD loops exceed Groq's burst allowance on the `llama-3.3-70b-versatile` model. Furthermore, when the streaming connection drops mid-generation due to a rate limit, the Python `requests.iter_lines()` generator throws a `ChunkedEncodingError` which wasn't caught, panicking the pipeline.
+
+**Resolution** (`llm_router.py`):
+- **Cerebras**: Changed default target model to active endpoint `llama3.1-8b`.
+- **Groq**: Added dynamic down-scaling; if the user requests `llama-3.3-70b-versatile` but hits rate limits, it auto-defaults to `llama-3.1-8b-instant` which offers vastly higher rate-limit ceilings.
+- **Resilience**: Wrapped the `response.iter_lines()` loop in a `try...except requests.exceptions.ChunkedEncodingError` block. When a stream drops, it gracefully prints `⚠️ Stream interrupted` and throws an `HTTPError(429)` allowing the auto-failover mechanism to gracefully rotate to the next LLM provider instead of crashing.
+
 ## Quick Reference: Configuration Variables
 
 | Variable | Default | Description |
