@@ -402,6 +402,16 @@ def setup_target_repository() -> None:
         shutil.rmtree("your_project")
 
     if PROJECT_TYPE == "existing":
+        # Auto-prepend the authenticated user's login if no owner is specified
+        if "/" not in TARGET_REPO:
+            try:
+                g = get_github_client(TARGET_REPO_TOKEN)
+                user = g.get_user()
+                TARGET_REPO = f"{user.login}/{TARGET_REPO}"
+                print(f"👉 Auto-resolved repository to: {TARGET_REPO}")
+            except Exception as e:
+                print(f"⚠️ Could not auto-resolve repository owner: {e}")
+
         print(f"🔄 Cloning existing project: {TARGET_REPO}")
         clone_url = f"https://oauth2:{TARGET_REPO_TOKEN}@github.com/{TARGET_REPO}.git"
         git_run(["git", "clone", clone_url, "your_project"], cwd=".", check=True)
