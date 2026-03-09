@@ -334,6 +334,31 @@ The `safe_path(path, sandbox)` function validates that every generated file live
 
 ---
 
+## 19. Unbounded Retries on API Rate Limits
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | If an LLM backend (e.g. Groq or Cerebras) goes down or returns a 429 Rate Limit error, the orchestrator spins endlessly. It registers 0 files generated, skips pytest, and jumps to the next iteration up to the max (15). |
+| **Log Signature** | 15 consecutive iterations printing: `⚠️ LLM generated 0 valid files. Skipping test validation for this iteration.` |
+| **Severity** | **Critical** — burns compute, logs, and time without any possibility of progress. |
+
+**Root Cause**: 
+The TDD loop had no awareness of *consecutive* catastrophic failures. It assumed a 0-file generation was a one-off fluke, rolled back, and kept trying until `max_iterations` was hit.
+
+**Resolution** (`ai_pipeline.py::run_tdd_loop`):
+- Implemented a `consecutive_zero_files` tracker.
+- If the AI returns 0 valid files for 3 consecutive iterations, the pipeline prints `❌ CRITICAL: LLM failed to generate valid code 3 times in a row. Aborting TDD loop to save compute` and `break`s the main execution loop entirely.
+
+---
+
+## 20. Advanced Agent Intelligence & Elegance Heuristics
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | Agents make the same mistakes across sessions, write lazy temporary fixes, and generate overly complex solutions for simple tasks. |
+| **Resolution** | Prompt Engineering Injections (`ai_pipeline.py`): <br> **1.** Added `docs/lessons.md` injection. If the file exists, the Engineer reads it. The Engineer is instructed to document its own mistakes here so it never repeats them. <br> **2.** Injected a strict `CORE PRINCIPLES` list into the Engineer prompt demanding Simplicity, Elegance, Autonomous Bug Fixing, and passing Verification before tasks are completed. <br> **3.** Updated Planner prompts to force detailed specs upfront and to isolate tasks to exactly one atomic action per Subagent. |
+
+
 ## Quick Reference: Configuration Variables
 
 | Variable | Default | Description |
@@ -350,7 +375,7 @@ The `safe_path(path, sandbox)` function validates that every generated file live
 
 | Metric | Value |
 |--------|-------|
-| **Total Tests** | 281 |
+| **Total Tests** | 114 |
 | **Pass Rate** | 100% |
-| **Coverage** | 90.77% |
+| **Coverage** | 90% |
 | **Coverage Threshold** | 90% |

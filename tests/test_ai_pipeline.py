@@ -2,6 +2,7 @@ import sys
 import os
 import subprocess
 import unittest
+import io
 from unittest.mock import patch, mock_open, MagicMock, call
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -646,6 +647,44 @@ class TestWebhookAndMisc(unittest.TestCase):
         self.assertEqual(mock_sel.call_count, 1)
 
 
+class TestUpdateTaskPlanRequirements(unittest.TestCase):
+    """Tests for the new deduplicating requirements behavior in update_task_plan."""
+
+    @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task\n")
+    @patch('os.makedirs')
+    @patch('os.path.exists', side_effect=lambda p: True)  # Both reqs and tasks exist
+    def test_update_task_plan_duplicate_reqs(self, mock_exists, mock_makedirs, mock_ai):
+        # Setup mock open
+        mock_file_obj = mock_open(read_data="Old reqs\n## New Requirements (Update)\nExisting prompt\n")
+        
+        with patch('builtins.open', mock_file_obj) as mock_file:
+            ai_pipeline.update_task_plan("Existing prompt")
+            
+            # Should have called ai_generate
+            self.assertTrue(mock_ai.called)
+            
+            # Should NOT have appended to requirements.md
+            write_calls = mock_file().write.call_args_list
+            failed_to_dedupe = any("Existing prompt" in str(args) for args, kwargs in write_calls)
+            self.assertFalse(failed_to_dedupe)
+
+    @patch('scripts.ai_pipeline.ai_generate', return_value="- [ ] Task\n")
+    @patch('os.makedirs')
+    @patch('os.path.exists', side_effect=lambda p: True) 
+    def test_update_task_plan_new_reqs(self, mock_exists, mock_makedirs, mock_ai):
+        mock_file_obj = mock_open(read_data="Old reqs\n")
+        
+        with patch('builtins.open', mock_file_obj) as mock_file:
+            ai_pipeline.update_task_plan("New awesome prompt")
+            
+            self.assertTrue(mock_ai.called)
+            
+            # Should HAVE appended to requirements.md
+            write_calls = mock_file().write.call_args_list
+            success = any("New awesome prompt" in str(args) for args, kwargs in write_calls)
+            self.assertTrue(success)
+
+
 class TestTDDLoopBranches(unittest.TestCase):
     """Tests for run_tdd_loop branch coverage."""
 
@@ -864,6 +903,53 @@ class TestInstallProjectDependencies(unittest.TestCase):
         ai_pipeline._deps_installed_hash = ""
         ai_pipeline._install_project_dependencies("your_project")
         # Should not crash
+
+
+class TestTDDLoopEarlyAbort(unittest.TestCase):
+    """Test the early abort mechanism when LLM repeatedly fails."""
+
+    @patch("scripts.ai_pipeline.execute_task")
+    @patch("scripts.ai_pipeline.run_pytest_validation")
+    @patch("scripts.ai_pipeline.save_rollback_point")
+    @patch("scripts.ai_pipeline.rollback_if_worse")
+    @patch("scripts.ai_pipeline.post_help_comment")
+    @patch("scripts.ai_pipeline.generate_run_summary")
+    def test_tdd_loop_early_abort(self, mock_summary, mock_post_help, mock_rollback, mock_save_rollback, mock_run_pytest, mock_execute_task):
+        """Test that TDD loop aborts early if LLM fails to generate files 3 times consistently."""
+        
+        # Setup mock file system state for the task
+        with patch('builtins.open', mock_open(read_data="- [ ] Task 1\n")) as m_open:
+            with patch('os.path.exists') as m_exists:
+                # Mock project_tasks.md exists, conftest.py does not
+                m_exists.side_effect = lambda path: path == "your_project/project_tasks.md"
+                
+                # Mock execute_task to always return 0 files written
+                mock_execute_task.return_value = 0
+                
+                # Capture stdout
+                captured_output = io.StringIO()
+                original_stdout = sys.stdout
+                sys.stdout = captured_output
+
+                try:
+                    # Run the loop with max 15 iterations
+                    ai_pipeline.run_tdd_loop(max_iterations=15)
+                finally:
+                    sys.stdout = original_stdout
+                
+                # Verify the loop ran `execute_task` exactly 3 times before breaking
+                self.assertEqual(mock_execute_task.call_count, 3)
+                
+                # Verify it aborted early with the correct message
+                output_str = captured_output.getvalue()
+                self.assertIn("CRITICAL: LLM failed to generate valid code 3 times in a row", output_str)
+                self.assertIn("aborted early after 3 iterations due to catastrophic LLM failure", output_str)
+                
+                # Verify help comment was posted
+                mock_post_help.assert_called_once()
+                
+                # Ensure pytest validation was skipped entirely
+                mock_run_pytest.assert_not_called()
 
 
 class TestExtractModuleNotFound(unittest.TestCase):
