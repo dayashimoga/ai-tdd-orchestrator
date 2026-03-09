@@ -538,7 +538,9 @@ def generate_task_plan(prompt: str) -> None:
         f"Based on the following project requirements: {prompt}\n\n"
         "Create a comprehensive implementation plan as a strict Markdown checklist.\n"
         "Break the work down into detailed, actionable steps (e.g., '- [ ] Create models.py with User schema', not just '- [ ] Core Logic').\n"
-        "Ensure there is a step for writing comprehensive Pytest unit tests.\n"
+        "Write detailed specs upfront to reduce ambiguity.\n"
+        "One task per subagent: Keep tasks focused so they can be executed in a single atomic iteration.\n"
+        "Ensure there is a step for writing comprehensive Pytest unit tests. Verify before marking done.\n"
         "Output ONLY the markdown checklist formatted exactly like this:\n"
         "- [ ] Detailed step 1\n"
         "- [ ] Detailed step 2\n"
@@ -588,6 +590,8 @@ def update_task_plan(new_prompt: str) -> None:
         "Update the task list to incorporate these new requirements. "
         "Keep completed tasks marked as '- [x]'. "
         "Add new tasks as '- [ ]' with descriptive, actionable instructions. "
+        "Write detailed specs upfront to reduce ambiguity. "
+        "One task per subagent: Keep tasks focused so they can be executed in a single atomic iteration. "
         "Output ONLY the full updated markdown checklist."
     )
     plan_output = ai_generate(plan_prompt)
@@ -675,10 +679,26 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
     if rag_context:
         print(f"📚 RAG: Injected reference document context into prompt")
 
+    # E10: Teach the Engineer from previous mistakes
+    lessons_context = ""
+    lessons_path = "your_project/docs/lessons.md"
+    if os.path.exists(lessons_path):
+        with open(lessons_path, "r", encoding="utf-8") as f:
+           lessons_context = f.read()
+           if lessons_context.strip():
+               print(f"🧠 Injecting {len(lessons_context.splitlines())} lines of self-improvement lessons")
+
     # CG1 + CG4: Enhanced engineer prompt with few-shot example and strict enforcement
     engineer_prompt = (
         f"You are the Engineer Agent. You MUST output ONLY code blocks using the exact delimiter format shown below.\n"
         f"Do NOT include explanations, commentary, or conversation. Output ONLY code.\n\n"
+        f"--- CORE PRINCIPLES (STRICTLY ENFORCED) ---\n"
+        f"1. Simplicity First: Make every change as simple as possible. Minimal impact.\n"
+        f"2. Demand Elegance: For non-trivial changes, implement the elegant solution. Skip for simple fixes.\n"
+        f"3. Autonomous Bug Fixing: Zero hand-holding. Fix failing tests/bugs without asking for help.\n"
+        f"4. Self-Improvement: If you repeat a mistake, output a '--- FILE: docs/lessons.md ---' appending the pattern so you don't repeat it.\n"
+        f"5. Verification Before Done: Do not consider tasks complete without proving they work via tests.\n\n"
+        f"--- SELF-IMPROVEMENT LESSONS ---\n{lessons_context}\n\n"
         f"--- PROJECT REQUIREMENTS ---\n{req_context}\n\n"
         f"{rag_context}"
         f"Your current granular task is: {task_description}\n\n"
@@ -933,6 +953,7 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
     failed_tasks: List[str] = []
     loop_start = time.time()
     retry_count = 0  # TF2: Track consecutive retries for the same task
+    consecutive_zero_files = 0 # E9: Stop mindless spinning on backend failure
     iteration_memory: List[str] = []  # E3: What the LLM tried in previous iterations
     last_coverage_output = ""  # TF4: Reuse coverage stats
     skipped_tasks: List[str] = []  # D2: Tasks skipped after hitting per-task retry cap
@@ -1037,10 +1058,19 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
 
                 # CG7: If LLM produced zero valid files, skip pytest entirely
                 if files_written == 0:
-                    print("⚠️ LLM generated 0 valid files. Skipping test validation for this iteration.")
+                    consecutive_zero_files += 1
+                    print(f"⚠️ LLM generated 0 valid files. Consecutive failures: {consecutive_zero_files}/3. Skipping tests.")
                     rollback_if_worse(rollback_hash, False)
                     current_feedback = "LLM failed to generate any valid code files. All providers may be rate-limited or unavailable."
+                    
+                    if consecutive_zero_files >= 3:
+                        print("\n❌ CRITICAL: LLM failed to generate valid code 3 times in a row. Aborting TDD loop to save compute.")
+                        all_done = False
+                        break # Break out of inner loop
                     break
+                else:
+                    consecutive_zero_files = 0
+
 
                 # D4: Auto-create conftest.py to fix import issues
                 conftest_path = os.path.join("your_project", "conftest.py")
@@ -1112,6 +1142,12 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
             print("\n==============================================")
             print("🎉 ALL TASKS COMPLETE AND TESTS PASS. TDD PIPELINE FINISHED.")
             print("==============================================")
+            break
+            
+        # Check if we aborted early due to consecutive zero files
+        if 'consecutive_zero_files' in locals() and consecutive_zero_files >= 3:
+            print(f"\n⚠️ TDD loop aborted early after {iteration + 1} iterations due to catastrophic LLM failure.")
+            post_help_comment()
             break
     else:
         print(f"\n⚠️ TDD loop exhausted max {max_iterations} iterations without resolving all tasks.")
