@@ -96,20 +96,19 @@ class TestUtilities(unittest.TestCase):
         long_text = "This is a very long text that does not contain any code blocks or any file delimiters and should be rejected."
         valid, err = ai_pipeline.validate_llm_response(long_text)
         self.assertFalse(valid)
-        self.assertIn("no code blocks", err)
+        self.assertIn("no <thought>, <edit>, or <use_mcp_tool>", err.lower())
 
-    def test_parse_and_write_files_syntax_error(self):
+    def test_apply_search_replace_syntax_error(self):
         # CG6: Syntax-invalid Python files are now REFUSED (not written)
-        raw = "--- FILE: bad.py ---\ndef foo("
+        raw = '<edit path="your_project/bad.py">\n<<<< SEARCH\n==== REPLACE\ndef foo(\n>>>>\n</edit>'
         with patch('scripts.ai_pipeline.safe_path', return_value="your_project/bad.py"):
             with patch('os.makedirs'):
-                with patch('builtins.open', mock_open()):
+                with patch('builtins.open', mock_open(read_data="")):
                     with patch('builtins.print') as mock_print:
                         with patch('scripts.ai_pipeline.validate_python_syntax', return_value=(False, "SyntaxError in bad.py: stable error")):
-                            count = ai_pipeline.parse_and_write_files(raw, "your_project")
+                            count = ai_pipeline.apply_search_replace_blocks(raw, "your_project")
                             self.assertEqual(count, 0)  # CG6: file NOT written
-                            mock_print.assert_any_call("❌ REJECTED bad.py: SyntaxError in bad.py: stable error — file NOT written (prevents snapshot pollution)")
-                            mock_print.assert_any_call("\n⚠️ 1 Python file(s) REJECTED due to syntax errors")
+                            mock_print.assert_any_call("❌ REJECTED your_project/bad.py: SyntaxError in bad.py: stable error — file NOT written (Syntax Error)")
 
     def test_extract_failures_full_short_summary(self):
         # Cover lines 131, 134-140
@@ -124,12 +123,12 @@ class TestUtilities(unittest.TestCase):
         valid, err = ai_pipeline.validate_python_syntax("x = 1\n", "script.py")
         self.assertTrue(valid)
 
-    def test_parse_and_write_files_odd_parts(self):
-
-        # Line 192: i + 1 >= len(parts)
-        raw = "--- FILE: file.py ---"
-        count = ai_pipeline.parse_and_write_files(raw)
-        self.assertEqual(count, 0)
+    def test_apply_search_replace_missing_thought(self):
+        # Validate logic requires either <thought> or <edit>
+        raw = "Just conversational text with no tags."
+        valid, err = ai_pipeline.validate_llm_response(raw)
+        self.assertFalse(valid)
+        self.assertIn("No <thought>, <edit>, or <use_mcp_tool>", err)
 
 
     def test_gpu_cost_err(self):
@@ -330,9 +329,9 @@ class TestTDDLoop(unittest.TestCase):
         ai_pipeline.update_task_plan("Add a new feature")
         mock_gen.assert_called_once()
 
-    @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: main.py ---\nprint('hi')")
+    @patch('scripts.ai_pipeline.ai_generate', return_value='<edit path="your_project/main.py">\n<<<< SEARCH\n==== REPLACE\nprint("hi")\n>>>>\n</edit>')
     @patch('scripts.ai_pipeline.repo_map')
-    @patch('scripts.ai_pipeline.parse_and_write_files', return_value=1)
+    @patch('scripts.ai_pipeline.apply_search_replace_blocks', return_value=1)
     @patch('scripts.llm_router.generate', return_value="NONE")
     @patch('builtins.print')
     def test_execute_task(self, mock_print, mock_llm, mock_parse, mock_rmap, mock_gen):
@@ -531,7 +530,7 @@ class TestMainCLI(unittest.TestCase):
 
 
     @patch('scripts.ai_pipeline.ai_generate', return_value="no files here")
-    @patch('scripts.ai_pipeline.parse_and_write_files', return_value=0)
+    @patch('scripts.ai_pipeline.apply_search_replace_blocks', return_value=0)
     @patch('os.path.exists', return_value=True)
     @patch('os.walk', return_value=[])
     @patch('builtins.open', new_callable=mock_open, read_data="Build app")
@@ -566,35 +565,45 @@ class TestGetModifiedFiles(unittest.TestCase):
         self.assertTrue(len(files) >= 1)
 
 
-class TestPostInlineComment(unittest.TestCase):
-    """Tests for post_inline_comment."""
+class TestApplySearchReplaceBlocks(unittest.TestCase):
+    """Tests parsing of Claude-code style <edit> blocks."""
 
-    @patch('scripts.ai_pipeline.IS_LOCAL', True)
-    @patch('builtins.print')
-    def test_inline_comment_local(self, mock_print):
-        ai_pipeline.post_inline_comment("file.py", 10, "Fix this")
-        mock_print.assert_any_call("\n[Local Review] file.py:10 -> Fix this\n")
+    @patch('os.makedirs')
+    @patch('builtins.open', new_callable=mock_open, read_data="def old_func():\n    return 0\n")
+    @patch('os.path.exists', return_value=True)
+    @patch('scripts.ai_pipeline.safe_path', return_value="your_project/file.py")
+    def test_apply_replace(self, mock_safe_path, mock_exists, mock_file, mock_makedirs):
+        raw = (
+            '<edit path="your_project/file.py">\n'
+            '<<<< SEARCH\n'
+            'def old_func():\n'
+            '    return 0\n'
+            '==== REPLACE\n'
+            'def new_func():\n'
+            '    return 1\n'
+            '>>>>\n'
+            '</edit>'
+        )
+        count = ai_pipeline.apply_search_replace_blocks(raw)
+        self.assertEqual(count, 1)
+        mock_file.return_value.write.assert_called_once_with("def new_func():\n    return 1\n")
 
-    @patch('scripts.ai_pipeline.IS_LOCAL', False)
-    @patch('scripts.ai_pipeline.GITHUB_TOKEN', 'token')
-    @patch('scripts.ai_pipeline.PR_NUMBER', '1')
-    @patch('scripts.ai_pipeline.REPO_NAME', 'org/repo')
-    @patch('scripts.ai_pipeline.COMMIT_SHA', 'abc123')
-    @patch('scripts.ai_pipeline.get_github_client')
-    def test_inline_comment_github(self, mock_gh):
-        ai_pipeline.post_inline_comment("file.py", 10, "Fix this")
-        mock_gh.return_value.get_repo.return_value.get_pull.return_value.create_review_comment.assert_called_once()
-
-    @patch('scripts.ai_pipeline.IS_LOCAL', False)
-    @patch('scripts.ai_pipeline.GITHUB_TOKEN', 'token')
-    @patch('scripts.ai_pipeline.PR_NUMBER', '1')
-    @patch('scripts.ai_pipeline.REPO_NAME', 'org/repo')
-    @patch('scripts.ai_pipeline.COMMIT_SHA', 'abc123')
-    @patch('scripts.ai_pipeline.get_github_client', side_effect=Exception("API fail"))
-    @patch('builtins.print')
-    def test_inline_comment_error(self, mock_print, mock_gh):
-        ai_pipeline.post_inline_comment("file.py", 10, "Fix this")
-        mock_print.assert_any_call("Failed to post PR comment: API fail")
+    @patch('os.makedirs')
+    @patch('builtins.open', new_callable=mock_open, read_data="")
+    @patch('os.path.exists', return_value=False)
+    @patch('scripts.ai_pipeline.safe_path', return_value="your_project/new.py")
+    def test_apply_create_new(self, mock_safe_path, mock_exists, mock_file, mock_makedirs):
+        raw = (
+            '<edit path="your_project/new.py">\n'
+            '<<<< SEARCH\n'
+            '==== REPLACE\n'
+            'def fresh(): pass\n'
+            '>>>>\n'
+            '</edit>'
+        )
+        count = ai_pipeline.apply_search_replace_blocks(raw)
+        self.assertEqual(count, 1)
+        mock_file.return_value.write.assert_called_once_with("\ndef fresh(): pass")
 
 
 class TestWebhookAndMisc(unittest.TestCase):
@@ -722,7 +731,7 @@ class TestTDDLoopBranches(unittest.TestCase):
     @patch('builtins.print')
     def test_tdd_loop_task_fails_exhausted(self, mock_print, mock_help, mock_rollback, mock_pytest, mock_exec, mock_save, mock_file, mock_exists):
         ai_pipeline.run_tdd_loop(max_iterations=1)
-        mock_rollback.assert_called()
+        mock_rollback.assert_not_called()
 
     @patch('subprocess.run', side_effect=Exception("No pytest found"))
     @patch('builtins.print')
@@ -746,9 +755,9 @@ class TestGenerateTaskPlanWithSummary(unittest.TestCase):
 class TestExecuteTaskBranches(unittest.TestCase):
     """Test execute_task file loading branches."""
 
-    @patch('scripts.ai_pipeline.ai_generate', return_value="--- FILE: main.py ---\ncode")
+    @patch('scripts.ai_pipeline.ai_generate', return_value='<edit path="your_project/main.py">\n<<<< SEARCH\n==== REPLACE\ncode\n>>>>\n</edit>')
     @patch('scripts.ai_pipeline.repo_map')
-    @patch('scripts.ai_pipeline.parse_and_write_files', return_value=1)
+    @patch('scripts.ai_pipeline.apply_search_replace_blocks', return_value=1)
     @patch('scripts.llm_router.generate', return_value="your_project/main.py")
     @patch('os.path.exists', return_value=True)
     @patch('os.path.isfile', return_value=True)
@@ -761,7 +770,7 @@ class TestExecuteTaskBranches(unittest.TestCase):
 
     @patch('scripts.ai_pipeline.ai_generate', return_value="just text no files")
     @patch('scripts.ai_pipeline.repo_map')
-    @patch('scripts.ai_pipeline.parse_and_write_files', return_value=0)
+    @patch('scripts.ai_pipeline.apply_search_replace_blocks', return_value=0)
     @patch('scripts.llm_router.generate', side_effect=Exception("timeout"))
     @patch('builtins.print')
     def test_execute_task_discovery_fails(self, mock_print, mock_llm, mock_parse, mock_rmap, mock_gen):
@@ -1086,7 +1095,7 @@ class TestValidateLLMResponseEdge(unittest.TestCase):
             "Sure! I'd be happy to help you build a REST API. Here is a simple flask application that manages tasks."
         )
         self.assertFalse(valid)
-        self.assertIn("no code blocks", err.lower())
+        self.assertIn("no <thought>, <edit>, or <use_mcp_tool>", err.lower())
 
 
 class TestRollbackDepCacheReset(unittest.TestCase):
@@ -1117,16 +1126,16 @@ class TestExecuteTaskReturn(unittest.TestCase):
             ai_pipeline.DRY_RUN = original
 
 
-class TestParseWriteFilesReject(unittest.TestCase):
-    """Cover CG6 reject path in parse_and_write_files."""
+class TestApplySearchReplaceReject(unittest.TestCase):
+    """Cover CG6 reject path in apply_search_replace_blocks."""
 
     def test_syntax_invalid_file_rejected(self):
         """Directly test that invalid Python is NOT written."""
-        raw = "--- FILE: broken.py ---\ndef foo(\n--- FILE: good.txt ---\nhello world"
+        raw = '<edit path="your_project/broken.py">\n<<<< SEARCH\n==== REPLACE\ndef foo(\n>>>>\n</edit>\n<edit path="your_project/good.txt">\n<<<< SEARCH\n==== REPLACE\nhello world\n>>>>\n</edit>'
         with patch('scripts.ai_pipeline.safe_path', return_value="your_project/good.txt"):
             with patch('os.makedirs'):
                 with patch('builtins.open', mock_open()):
-                    count = ai_pipeline.parse_and_write_files(raw, "your_project")
+                    count = ai_pipeline.apply_search_replace_blocks(raw, "your_project")
                     # Only the .txt file should be written, not the broken .py
                     self.assertEqual(count, 1)
 

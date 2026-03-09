@@ -23,6 +23,7 @@ import scripts.repo_map as repo_map
 import scripts.gpu_platform as gpu_platform
 import scripts.llm_router as llm_router
 import scripts.rag_engine as rag_engine
+import scripts.mcp_client as mcp_client
 
 # ---------------------------------------------------------------------------
 # Configuration (all env-configurable)
@@ -215,13 +216,9 @@ def validate_llm_response(raw_output: str) -> Tuple[bool, str]:
     if not raw_output or not raw_output.strip():
         return False, "LLM returned empty response"
 
-    # Check for at least one file delimiter (O4: compiled regex)
-    file_blocks = _RE_FILE_DELIMITER.findall(raw_output)
-    if not file_blocks:
-        # Check if the LLM returned conversational text instead of code
-        if len(raw_output) > 50 and '```' not in raw_output:
-            return False, "LLM response contains no code blocks or file delimiters"
-        return False, "No '--- FILE: path ---' delimiters found in response"
+    # Check for at least one edit block, thought block, or MCP tool invocation
+    if '<thought>' not in raw_output and '<edit' not in raw_output and '<use_mcp_tool' not in raw_output:
+        return False, "No <thought>, <edit>, or <use_mcp_tool> blocks found in response"
 
     return True, ""
 
@@ -266,56 +263,80 @@ def _sanitize_generated_code(content: str, file_path: str) -> str:
     return content
 
 
-def parse_and_write_files(raw_output: str, target_dir: str = "your_project") -> int:
-    """Parses LLM '--- FILE: path ---' delimited output and writes files.
-
-    Includes E5 syntax validation and CG5 post-processing before writing.
-    CG6: Refuses to write syntax-invalid Python files (prevents broken files
-    from being committed into rollback snapshots).
-    Returns the number of files written.
-    """
-    files_written = 0
-    syntax_errors: List[str] = []
-    # Split by standard delimiter (O4: compiled regex)
-    parts = _RE_FILE_DELIMITER.split(raw_output)
+def apply_search_replace_blocks(raw_output: str, target_dir: str = "your_project") -> int:
+    """Parses Claude-Code style <edit> blocks and applies targeted file edits.
     
-    for i in range(1, len(parts), 2):
-        if i + 1 >= len(parts):
-            break
+    Format expected:
+    <edit path="your_project/app.py">
+    <<<< SEARCH
+    def old():
+    ==== REPLACE
+    def new():
+    >>>>
+    </edit>
+    
+    Returns the number of successful file edits.
+    """
+    files_edited = 0
+    raw_output = raw_output.replace('\r\n', '\n')
+    
+    # 1. Parse all <edit> tags
+    edit_blocks = re.finditer(r'<edit\s+path=["\']([^"\']+)["\']>(.*?)</edit>', raw_output, re.DOTALL)
+    
+    for match in edit_blocks:
+        file_path = match.group(1).strip()
+        diff_content = match.group(2)
         
-        file_path = parts[i].strip()
-        raw_content = parts[i+1]
+        # 2. Extract SEARCH/REPLACE chunks
+        chunks = re.finditer(r'<<<< SEARCH\n(.*?)\n?==== REPLACE\n(.*?)\n?>>>>', diff_content, re.DOTALL)
         
-        # Strip trailing conversational fluff (O4: compiled regex)
-        match = _RE_CODE_BLOCK.search(raw_content)
-        if match:
-            content = match.group(1).strip()
+        validated = safe_path(file_path, target_dir)
+        if not validated:
+            continue
+            
+        write_path = os.path.join(target_dir, validated) if not validated.startswith(target_dir) else validated
+        
+        # 3. Read existing file or create new
+        if os.path.exists(write_path):
+            with open(write_path, "r", encoding="utf-8") as f:
+                file_content = f.read()
         else:
-            content = raw_content.strip()
+            file_content = ""
+            os.makedirs(os.path.dirname(write_path), exist_ok=True)
             
-        if content:
-            # CG5: Post-process to fix common LLM mistakes
-            content = _sanitize_generated_code(content, file_path)
+        # 4. Apply all patches for this file
+        patch_applied = False
+        for chunk in chunks:
+            search_text = chunk.group(1)
+            replace_text = chunk.group(2)
             
-            # E5 + CG6: Syntax validation — REFUSE to write invalid Python files
-            valid, err = validate_python_syntax(content, file_path)
+            # Post-process generated code 
+            replace_text = _sanitize_generated_code(replace_text, file_path)
+            
+            # If search block is empty, append to end of file (or create new)
+            if not search_text.strip():
+                file_content += "\n" + replace_text
+                patch_applied = True
+            elif search_text in file_content:
+                file_content = file_content.replace(search_text, replace_text, 1)
+                patch_applied = True
+            else:
+                print(f"⚠️ SEARCH block not found in {file_path}. Skipping this chunk.")
+        
+        # 5. Write back to disk
+        if patch_applied:
+            # E5 + CG6: Syntax validation for Python files
+            valid, err = validate_python_syntax(file_content, file_path)
             if not valid:
-                syntax_errors.append(err)
-                print(f"❌ REJECTED {file_path}: {err} — file NOT written (prevents snapshot pollution)")
-                continue  # CG6: Skip writing this broken file entirely
+                print(f"❌ REJECTED {file_path}: {err} — file NOT written (Syntax Error)")
+                continue
 
-            validated = safe_path(file_path, target_dir)
-            if validated:
-                write_path = os.path.join(target_dir, validated) if not validated.startswith(target_dir) else validated
-                os.makedirs(os.path.dirname(write_path), exist_ok=True)
-                with open(write_path, "w", encoding="utf-8") as f:
-                    f.write(content + "\n")
-                files_written += 1
-
-    if syntax_errors:
-        print(f"\n⚠️ {len(syntax_errors)} Python file(s) REJECTED due to syntax errors")
-
-    return files_written
+            with open(write_path, "w", encoding="utf-8") as f:
+                f.write(file_content)
+            files_edited += 1
+            print(f"✅ Applied targeted edit to {file_path}")
+            
+    return files_edited
 
 # ---------------------------------------------------------------------------
 # Core LLM Interface
@@ -524,10 +545,10 @@ def ensure_code_exists() -> None:
             print("✅ AI Codebase Generation Complete. Synchronizing files to disk...\n")
 
             os.makedirs("your_project", exist_ok=True)
-            files_written = parse_and_write_files(raw_output, "your_project")
+            files_edited = apply_search_replace_blocks(raw_output, "your_project")
 
             # Fallback if LLM ignored structured instructions
-            if files_written == 0 and raw_output.strip():
+            if files_edited == 0 and raw_output.strip():
                 with open("your_project/generated_code.txt", "w") as f:
                     f.write(raw_output)
 
@@ -702,48 +723,51 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
            if lessons_context.strip():
                print(f"🧠 Injecting {len(lessons_context.splitlines())} lines of self-improvement lessons")
 
-    # CG1 + CG4: Enhanced engineer prompt with few-shot example and strict enforcement
     engineer_prompt = (
-        f"You are the Engineer Agent. You MUST output ONLY code blocks using the exact delimiter format shown below.\n"
-        f"Do NOT include explanations, commentary, or conversation. Output ONLY code.\n\n"
+        f"You are the Engineer Agent. You MUST modify the codebase using EXACT Search/Replace blocks.\n"
+        f"Do NOT output entire files unless you are creating a brand new file.\n\n"
         f"--- CORE PRINCIPLES (STRICTLY ENFORCED) ---\n"
-        f"1. Simplicity First: Make every change as simple as possible. Minimal impact.\n"
-        f"2. Demand Elegance: For non-trivial changes, implement the elegant solution. Skip for simple fixes.\n"
-        f"3. Autonomous Bug Fixing: Zero hand-holding. Fix failing tests/bugs without asking for help.\n"
-        f"4. Self-Improvement: If you repeat a mistake, output a '--- FILE: docs/lessons.md ---' appending the pattern so you don't repeat it.\n"
-        f"5. Verification Before Done: Do not consider tasks complete without proving they work via tests.\n\n"
+        f"1. Mandatory Chain-of-Thought: Before editing code, you MUST output a <thought>...</thought> block analyzing the problem and explaining your exact plan.\n"
+        f"2. Simplicity First: Make every change as simple as possible. Minimal impact.\n"
+        f"3. Demand Elegance: For non-trivial changes, implement the elegant solution.\n"
+        f"4. Autonomous Bug Fixing: Zero hand-holding. Fix failing tests/bugs without asking for help.\n"
+        f"5. Self-Improvement: If you repeat a mistake, learn from it.\n"
+        f"6. Verification Before Done: Do not consider tasks complete without proving they work via tests.\n\n"
         f"--- SELF-IMPROVEMENT LESSONS ---\n{lessons_context}\n\n"
         f"--- PROJECT REQUIREMENTS ---\n{req_context}\n\n"
         f"{rag_context}"
         f"Your current granular task is: {task_description}\n\n"
         f"Here is your optimized project context:\n{context}\n\n"
-        "Generate fully functional, production-ready code. DO NOT generate dummy or placeholder code.\n"
-        "If the task involves testing, use `pytest` with descriptive test names.\n\n"
-        "CRITICAL: You MUST ALWAYS generate a requirements.txt file listing ALL third-party dependencies "
-        "(e.g. flask, fastapi, requests, sqlalchemy, etc.). Without this file, tests will fail with ModuleNotFoundError.\n\n"
-        "CRITICAL: Do NOT include any explanations, descriptions, or English prose inside code files. "
-        "Every line in a .py file must be valid Python syntax. Comments using # are fine.\n\n"
-        "CRITICAL: Do NOT use 'from your_project.X import' — use 'from X import' instead. "
-        "The project root is already on sys.path.\n\n"
+        "Generate fully functional, production-ready code. DO NOT generate dummy or placeholder code.\n\n"
         "OUTPUT FORMAT (you MUST follow this exactly):\n"
-        "--- FILE: requirements.txt ---\n"
-        "```\n"
-        "flask>=3.0\n"
-        "pytest>=8.0\n"
-        "```\n\n"
-        "--- FILE: app.py ---\n"
-        "```python\n"
-        "from flask import Flask\n\n"
-        "app = Flask(__name__)\n"
-        "```\n\n"
-        "--- FILE: tests/test_app.py ---\n"
-        "```python\n"
-        "from app import app\n\n"
-        "def test_app():\n"
-        "    client = app.test_client()\n"
-        "    assert client.get('/').status_code == 200\n"
-        "```\n\n"
-        "Now generate your code following this EXACT format. Output ONLY '--- FILE:' blocks and code. NO other text."
+        "1. First, think about the solution inside <thought> blocks.\n"
+        "2. If you need external data (DB, Shell, GPU), use <use_mcp_tool> blocks. The system will respond with results in the next turn.\n"
+        "3. Then, apply changes using <edit> blocks with <<<< SEARCH and ==== REPLACE sequences.\n"
+        "4. The SEARCH block MUST perfectly match existing lines in the file, including indentation and whitespace.\n"
+        "5. If you are creating a NEW file, leave the SEARCH block totally empty.\n\n"
+        "AVAILABLE MCP TOOLS (JSON Schema):\n"
+        f"{mcp_client.format_mcp_tools_for_prompt()}\n\n"
+        "MCP TOOL USAGE EXAMPLE:\n"
+        "<thought>\n"
+        "I need to check what files are in the src directory before editing.\n"
+        "</thought>\n"
+        '<use_mcp_tool name="run_shell_command">\n'
+        '{"command": "ls -la tests/"}\n'
+        '</use_mcp_tool>\n\n'
+        "EDIT EXAMPLE:\n"
+        "<thought>\n"
+        "The test is failing because the function returns `None` instead of `True`. I need to change the return value.\n"
+        "</thought>\n\n"
+        '<edit path="your_project/app.py">\n'
+        "<<<< SEARCH\n"
+        "def is_valid():\n"
+        "    return None\n"
+        "==== REPLACE\n"
+        "def is_valid():\n"
+        "    return True\n"
+        ">>>>\n"
+        "</edit>\n\n"
+        "Now, solve the task. Output ONLY <thought>, <use_mcp_tool>, and <edit> blocks."
     )
 
     if DRY_RUN:
@@ -751,21 +775,45 @@ def execute_task(task_description: str, use_cache: bool = False, base_task: str 
         print(engineer_prompt[:500] + "...")
         return 0
 
-    # E8: Retry LLM if response is malformed (up to 2 extra attempts)
+    conversation_history = ""
+    files_edited = 0
     raw_output = ""
-    for attempt in range(3):
-        raw_output = ai_generate(engineer_prompt)
-        valid, err = validate_llm_response(raw_output)
-        if valid:
-            break
-        print(f"⚠️ LLM response validation failed (attempt {attempt + 1}/3): {err}")
-        if attempt < 2:
-            print("🔄 Retrying LLM call...")
 
-    files_written = parse_and_write_files(raw_output, "your_project")
+    # MCP execution loop: allows LLM to invoke tools and reason multiple times
+    for mcp_cycle in range(10):
+        current_prompt = engineer_prompt + conversation_history
+        
+        # E8: Retry LLM if response is malformed (up to 2 extra attempts)
+        for attempt in range(3):
+            raw_output = ai_generate(current_prompt)
+            valid, err = validate_llm_response(raw_output)
+            if valid:
+                break
+            print(f"⚠️ LLM response validation failed (attempt {attempt + 1}/3): {err}")
+            if attempt < 2:
+                print("🔄 Retrying LLM call...")
+                
+        # Parse for MCP tools
+        tool_matches = list(re.finditer(r'<use_mcp_tool\s+name=["\']([^"\']+)["\']>(.*?)</use_mcp_tool>', raw_output, re.DOTALL))
+        
+        if tool_matches:
+            # Append LLM's response so it remembers what it said
+            conversation_history += f"\n\nAssistant:\n{raw_output}\n\nSystem Tool Results:\n"
+            for match in tool_matches:
+                tool_name = match.group(1).strip()
+                kwargs_json = match.group(2).strip()
+                result = mcp_client.execute_mcp_tool(tool_name, kwargs_json)
+                conversation_history += f"--- Result for {tool_name} ---\n{result}\n"
+            conversation_history += "\nPlease continue your task using these results. If finished, output <edit> blocks."
+            continue  # Loop back to let the LLM generate more text/tools/edits
+            
+        # If no MCP tools were requested, we assume it has outputted final <edit> blocks
+        files_edited = apply_search_replace_blocks(raw_output, "your_project")
+        break
+
     # Invalidate repo map cache after files change
     _repo_map_cache = None
-    return files_written
+    return files_edited
 
 
 def detect_test_command(project_dir: str = "your_project") -> List[str]:
@@ -996,6 +1044,8 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                     if retry_count > MAX_RETRIES_PER_TASK:
                         print(f"\n⚠️ Task '{base_task_description}' hit retry cap ({MAX_RETRIES_PER_TASK}). Skipping to next task.")
                         skipped_tasks.append(base_task_description)
+                        # Progressive Self-Correction failed too many times; finally wipe the slate clean
+                        rollback_if_worse(rollback_hash, False)
                         current_feedback = ""
                         retry_count = 0
                         iteration_memory = []
@@ -1052,10 +1102,7 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                             f"Test failures:\n{concise_feedback}\n\n"
                             f"IMPORTANT: Previous {retry_count} fix attempts did NOT work. Here is what was tried:\n{memory_text}\n\n"
                             f"HERE IS YOUR PREVIOUS BROKEN CODE:\n{source_files_context}\n{test_files_context}\n\n"
-                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes.\n"
-                            f"RULES: Every line in .py files must be valid Python. No English sentences. "
-                            f"Use 'from app import X' NOT 'from your_project.app import X'. "
-                            f"Generate requirements.txt."
+                            f"Try a COMPLETELY DIFFERENT approach. Do NOT repeat previous mistakes. Use <thought> and <edit> blocks."
                         )
 
                     # E3: Record what we're about to try
@@ -1145,8 +1192,9 @@ def run_tdd_loop(max_iterations: int = MAX_TDD_ITERATIONS) -> None:
                     retry_count = 0
                     iteration_memory = []
                 else:
-                    rollback_if_worse(rollback_hash, False)
-                    print(f"⚠️ Task Failed Validation. Iteration {iteration + 1} took {elapsed:.1f}s — will retry.")
+                    # PROGRESSIVE SELF-CORRECTION: DO NOT ROLLBACK YET.
+                    # We leave the code slightly broken so the Agent can recursive-debug it on the next iteration.
+                    print(f"⚠️ Task Failed Validation. Iteration {iteration + 1} took {elapsed:.1f}s — will retry incrementally.")
                     failed_tasks.append(base_task_description)
                     current_feedback = feedback
 
