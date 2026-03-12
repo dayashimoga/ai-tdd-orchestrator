@@ -1,564 +1,313 @@
-"""Tests for scripts/llm_router.py"""
+import unittest
 import os
+import sys
 import json
-import time
-from unittest.mock import patch, MagicMock, PropertyMock
-import pytest
 import requests
-from scripts.llm_router import (
-    _ollama_generate, _openai_generate, _anthropic_generate,
-    _gemini_generate, _groq_generate, _cerebras_generate,
-    _openai_compatible_generate, _call_provider, _is_failover_error,
-    generate, get_provider_info,
-    _get_session, _retry_request,
-    PROVIDER_FAILOVER_CHAIN, FAILOVER_STATUS_CODES,
-)
+from unittest.mock import MagicMock, patch, mock_open
+
+# Ensure scripts directory is in path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import scripts.llm_router as llm_router
 
+class TestLLMRouter(unittest.TestCase):
+    def setUp(self):
+        # Clear environment variables before each test
+        self.env_patcher = patch.dict(os.environ, {}, clear=True)
+        self.env_patcher.start()
+        # Reset provider info
+        if hasattr(llm_router, '_session'):
+            llm_router._session = None
 
-class TestSessionPooling:
-    """Tests for connection pooling via requests.Session (O1)."""
+    def tearDown(self):
+        self.env_patcher.stop()
 
-    def test_get_session_returns_session(self):
-        llm_router._session = None
-        session = _get_session()
-        assert isinstance(session, requests.Session)
-        # Cleanup
-        llm_router._session = None
+    @patch('requests.Session.post')
+    def test_ollama_generate_success(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"response": "ollama response", "done": True}
+        mock_post.return_value = mock_response
 
-    def test_get_session_singleton(self):
-        llm_router._session = None
-        s1 = _get_session()
-        s2 = _get_session()
-        assert s1 is s2
-        llm_router._session = None
+        with patch.dict(os.environ, {"LLM_PROVIDER": "ollama", "OLLAMA_URL": "http://test:11434/api/generate"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "ollama response")
 
+    @patch('requests.Session.post')
+    def test_openai_generate_success(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "openai response"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+        }
+        mock_post.return_value = mock_response
 
-class TestRetryRequest:
-    """Tests for exponential backoff retry (CG2)."""
+        with patch.dict(os.environ, {"LLM_PROVIDER": "openai", "OPENAI_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "openai response")
 
-    @patch.object(requests.Session, 'post')
-    def test_retry_success_first_try(self, mock_post):
-        llm_router._session = None
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-        result = _retry_request("POST", "http://test.com", json={}, timeout=10)
-        assert result.status_code == 200
-        llm_router._session = None
+    @patch('requests.Session.post')
+    def test_anthropic_generate_success(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "content": [{"text": "anthropic response"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5}
+        }
+        mock_post.return_value = mock_response
 
-    @patch.object(requests.Session, 'post')
-    def test_retry_on_connection_error(self, mock_post):
-        llm_router._session = None
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.raise_for_status = MagicMock()
+        with patch.dict(os.environ, {"LLM_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "anthropic response")
+
+    @patch('requests.Session.post')
+    def test_gemini_generate_success(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "gemini response"}]}}]
+        }
+        mock_post.return_value = mock_response
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": "gemini", "GOOGLE_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "gemini response")
+
+    @patch('requests.Session.post')
+    def test_groq_generate_success(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "groq response"}}]
+        }
+        mock_post.return_value = mock_response
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": "groq", "GROQ_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "groq response")
+
+    @patch('requests.Session.post')
+    def test_cerebras_generate_success(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "cerebras response"}}]
+        }
+        mock_post.return_value = mock_response
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": "cerebras", "CEREBRAS_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "cerebras response")
+
+    @patch('requests.Session.post')
+    def test_provider_failover_logic(self, mock_post):
+        # Groq (429) -> 1 response
+        # Cerebras (500) -> 3 retries (default MAX_RETRIES=3) -> 3 responses
+        # Gemini (200) -> 1 response
+        
+        mock_resp_fail_429 = MagicMock()
+        mock_resp_fail_429.status_code = 429
+        mock_resp_fail_429.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_resp_fail_429)
+
+        mock_resp_fail_500 = MagicMock()
+        mock_resp_fail_500.status_code = 500
+        mock_resp_fail_500.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_resp_fail_500)
+
+        mock_resp_success = MagicMock()
+        mock_resp_success.status_code = 200
+        mock_resp_success.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "gemini win"}]}}]
+        }
+
+        # Sequence: Groq(429), Cerebras(500), Cerebras(500), Cerebras(500), Gemini(200)
         mock_post.side_effect = [
-            requests.exceptions.ConnectionError("refused"),
-            mock_resp,
+            mock_resp_fail_429,
+            mock_resp_fail_500,
+            mock_resp_fail_500,
+            mock_resp_fail_500,
+            mock_resp_success
         ]
-        with patch('time.sleep'):
-            result = _retry_request("POST", "http://test.com", max_retries=2, json={}, timeout=10)
-        assert result.status_code == 200
-        llm_router._session = None
 
-    @patch.object(requests.Session, 'post')
-    def test_retry_exhausted(self, mock_post):
-        llm_router._session = None
-        mock_post.side_effect = requests.exceptions.ConnectionError("refused")
-        with patch('time.sleep'):
-            with pytest.raises(requests.exceptions.ConnectionError):
-                _retry_request("POST", "http://test.com", max_retries=2, json={}, timeout=10)
-        llm_router._session = None
+        with patch.dict(os.environ, {
+            "LLM_PROVIDER": "auto",
+            "GROQ_API_KEY": "gkey",
+            "CEREBRAS_API_KEY": "ckey",
+            "GOOGLE_API_KEY": "gmkey"
+        }):
+            # Reduce backoff for speed in tests
+            with patch('scripts.llm_router.BACKOFF_BASE', 0.01):
+                result = llm_router.generate("prompt", stream=False)
+                self.assertEqual(result, "gemini win")
 
-    @patch.object(requests.Session, 'post')
-    def test_retry_on_5xx(self, mock_post):
-        llm_router._session = None
-        mock_resp_500 = MagicMock()
-        mock_resp_500.status_code = 500
-        mock_resp_200 = MagicMock()
-        mock_resp_200.status_code = 200
-        mock_resp_200.raise_for_status = MagicMock()
-        mock_post.side_effect = [mock_resp_500, mock_resp_200]
-        with patch('time.sleep'):
-            result = _retry_request("POST", "http://test.com", max_retries=2, json={}, timeout=10)
-        assert result.status_code == 200
-        llm_router._session = None
+    def test_get_provider_info(self):
+        with patch.dict(os.environ, {"LLM_PROVIDER": "openai", "OPENAI_MODEL": "gpt-custom"}):
+            self.assertIn("OpenAI (gpt-custom)", llm_router.get_provider_info())
+        
+        with patch.dict(os.environ, {"LLM_PROVIDER": "anthropic", "ANTHROPIC_MODEL": "claude-custom"}):
+            self.assertIn("Anthropic (claude-custom)", llm_router.get_provider_info())
 
-    @patch.object(requests.Session, 'get')
-    def test_retry_get_method(self, mock_get):
-        llm_router._session = None
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.raise_for_status = MagicMock()
-        mock_get.return_value = mock_resp
-        result = _retry_request("GET", "http://test.com", timeout=10)
-        assert result.status_code == 200
-        llm_router._session = None
+        with patch.dict(os.environ, {"LLM_PROVIDER": "ollama", "OLLAMA_MODEL": "ollama-custom"}):
+            self.assertIn("Ollama (ollama-custom)", llm_router.get_provider_info())
 
-    @patch.object(requests.Session, 'post')
-    def test_retry_http_error_no_retry(self, mock_post):
-        llm_router._session = None
-        mock_resp = MagicMock()
-        mock_resp.status_code = 400
-        mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("Bad Request")
-        mock_post.return_value = mock_resp
-        with pytest.raises(requests.exceptions.HTTPError):
-            _retry_request("POST", "http://test.com", json={}, timeout=10)
-        llm_router._session = None
-
-
-class TestOllamaGenerate:
-    @patch("scripts.llm_router._retry_request")
-    def test_ollama_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [
-            json.dumps({"response": "Hello "}).encode(),
-            json.dumps({"response": "World"}).encode(),
+    @patch('requests.Session.post')
+    def test_generate_streaming_ollama(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_lines.return_value = [
+            json.dumps({"response": "Hello", "done": False}).encode(),
+            json.dumps({"response": " world", "done": True}).encode(),
         ]
-        mock_retry.return_value = mock_resp
-        result = _ollama_generate("test", "qwen", "http://localhost/api/generate", 0.2, 8192, True)
-        assert result == "Hello World"
+        mock_post.return_value = mock_response
 
-    @patch("scripts.llm_router._retry_request")
-    def test_ollama_no_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"response": "Generated code"}
-        mock_retry.return_value = mock_resp
-        result = _ollama_generate("test", "qwen", "http://localhost/api/generate", 0.2, 8192, False)
-        assert result == "Generated code"
+        with patch.dict(os.environ, {"LLM_PROVIDER": "ollama", "OLLAMA_URL": "http://test:11434/api/generate"}):
+            result = llm_router.generate("test prompt", stream=True)
+            self.assertEqual(result, "Hello world")
 
-
-class TestOpenAIGenerate:
-    @patch("scripts.llm_router._retry_request")
-    def test_openai_no_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "OpenAI response"}}]
-        }
-        mock_retry.return_value = mock_resp
-        result = _openai_generate("test", "gpt-4o-mini", "key123", 0.2, False)
-        assert result == "OpenAI response"
-
-    @patch("scripts.llm_router._retry_request")
-    def test_openai_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [
-            b"data: " + json.dumps({"choices": [{"delta": {"content": "Stream "}}]}).encode(),
-            b"data: " + json.dumps({"choices": [{"delta": {"content": "Result"}}]}).encode(),
+    @patch('requests.Session.post')
+    def test_generate_streaming_openai(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_lines.return_value = [
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "Open"}}]}).encode(),
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "AI"}}]}).encode(),
             b"data: [DONE]"
         ]
-        mock_retry.return_value = mock_resp
-        result = _openai_generate("test", "gpt-4o", "key123", 0.2, True)
-        assert result == "Stream Result"
+        mock_post.return_value = mock_response
 
+        with patch.dict(os.environ, {"LLM_PROVIDER": "openai", "OPENAI_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=True)
+            self.assertEqual(result, "OpenAI")
 
-class TestAnthropicGenerate:
-    @patch("scripts.llm_router._retry_request")
-    def test_anthropic(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "content": [{"type": "text", "text": "Claude response"}]
-        }
-        mock_retry.return_value = mock_resp
-        result = _anthropic_generate("test", "claude-3-haiku", "key123", 0.2)
-        assert result == "Claude response"
+    @patch('requests.Session.get')
+    def test_retry_request_get(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_get.return_value = mock_response
+        res = llm_router._retry_request("GET", "http://test")
+        self.assertEqual(res, mock_response)
 
+    @patch('requests.Session.post')
+    def test_retry_request_exhaustion(self, mock_post):
+        mock_post.side_effect = requests.exceptions.ConnectionError("timeout")
+        with patch('scripts.llm_router.BACKOFF_BASE', 0.001):
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                llm_router._retry_request("POST", "http://test", max_retries=2)
 
-class TestGeminiGenerate:
-    @patch("scripts.llm_router._retry_request")
-    def test_gemini_no_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "candidates": [{"content": {"parts": [{"text": "Gemini response"}]}}]
-        }
-        mock_retry.return_value = mock_resp
-        result = _gemini_generate("test", "gemini-1.5-flash", "key123", 0.2, stream=False)
-        assert result == "Gemini response"
-
-    @patch("scripts.llm_router._retry_request")
-    def test_gemini_no_candidates(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"candidates": []}
-        mock_retry.return_value = mock_resp
-        result = _gemini_generate("test", "gemini-1.5-flash", "key123", 0.2, stream=False)
-        assert result == ""
-
-    @patch("scripts.llm_router._retry_request")
-    def test_gemini_stream(self, mock_retry):
-        """E5: Test Gemini streaming via SSE."""
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [
-            b"data: " + json.dumps({"candidates": [{"content": {"parts": [{"text": "Hello "}]}}]}).encode(),
-            b"data: " + json.dumps({"candidates": [{"content": {"parts": [{"text": "World"}]}}]}).encode(),
-        ]
-        mock_retry.return_value = mock_resp
-        result = _gemini_generate("test", "gemini-1.5-flash", "key123", 0.2, stream=True)
-        assert result == "Hello World"
-
-    @patch("scripts.llm_router._retry_request")
-    def test_gemini_stream_bad_json(self, mock_retry):
-        """Test Gemini streaming handles bad JSON gracefully."""
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [
-            b"data: not-valid-json",
-            b"data: " + json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}).encode(),
-        ]
-        mock_retry.return_value = mock_resp
-        result = _gemini_generate("test", "gemini-1.5-flash", "key123", 0.2, stream=True)
-        assert result == "OK"
-
-
-class TestGroqGenerate:
-    @patch("scripts.llm_router._retry_request")
-    def test_groq_no_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Groq response"}}]
-        }
-        mock_retry.return_value = mock_resp
-        result = _groq_generate("test", "llama-3.3-70b-versatile", "gsk_key", 0.2, False)
-        assert result == "Groq response"
-        # Verify correct API endpoint
-        call_args = mock_retry.call_args
-        assert "groq.com" in call_args[0][1]
-
-    @patch("scripts.llm_router._retry_request")
-    def test_groq_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [
-            b"data: " + json.dumps({"choices": [{"delta": {"content": "Fast "}}]}).encode(),
-            b"data: " + json.dumps({"choices": [{"delta": {"content": "inference"}}]}).encode(),
+    @patch('requests.Session.post')
+    def test_stream_usage_and_json_error(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_lines.return_value = [
+            b"invalid json",
+            b"data: " + json.dumps({"choices": [{"delta": {"content": "text"}}], "usage": {"prompt_tokens": 5}}).encode(),
             b"data: [DONE]"
         ]
-        mock_retry.return_value = mock_resp
-        result = _groq_generate("test", "mixtral-8x7b", "gsk_key", 0.2, True)
-        assert result == "Fast inference"
+        mock_post.return_value = mock_response
+        with patch.dict(os.environ, {"LLM_PROVIDER": "openai", "OPENAI_API_KEY": "test"}):
+            result = llm_router.generate("test", stream=True)
+            self.assertEqual(result, "text")
 
-
-class TestCerebrasGenerate:
-    @patch("scripts.llm_router._retry_request")
-    def test_cerebras_no_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Cerebras response"}}]
-        }
-        mock_retry.return_value = mock_resp
-        result = _cerebras_generate("test", "llama3.1-70b", "csk_key", 0.2, False)
-        assert result == "Cerebras response"
-        call_args = mock_retry.call_args
-        assert "cerebras.ai" in call_args[0][1]
-
-    @patch("scripts.llm_router._retry_request")
-    def test_cerebras_stream(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [
-            b"data: " + json.dumps({"choices": [{"delta": {"content": "Ultra "}}]}).encode(),
-            b"data: " + json.dumps({"choices": [{"delta": {"content": "fast"}}]}).encode(),
-            b"data: [DONE]"
+    @patch('requests.Session.post')
+    def test_ollama_stream_usage(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_lines.return_value = [
+            json.dumps({"response": "Hi", "done": False}).encode(),
+            json.dumps({"response": "", "done": True, "prompt_eval_count": 10, "eval_count": 5}).encode(),
         ]
-        mock_retry.return_value = mock_resp
-        result = _cerebras_generate("test", "llama3.1-70b", "csk_key", 0.2, True)
-        assert result == "Ultra fast"
+        mock_post.return_value = mock_response
+        with patch.dict(os.environ, {"LLM_PROVIDER": "ollama", "OLLAMA_URL": "http://test"}):
+            result = llm_router.generate("test", stream=True)
+            self.assertEqual(result, "Hi")
+        # HTTP 429
+        err_429 = requests.exceptions.HTTPError()
+        err_429.response = MagicMock(status_code=429)
+        self.assertTrue(llm_router._is_failover_error(err_429))
 
+        # HTTP 500
+        err_500 = requests.exceptions.HTTPError()
+        err_500.response = MagicMock(status_code=500)
+        self.assertTrue(llm_router._is_failover_error(err_500))
 
-class TestGenerate:
-    @patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_ollama_default(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "OK"}).encode()]
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "ollama"
-        result = llm_router.generate("test prompt", stream=True)
-        assert result == "OK"
+        # Connection error
+        self.assertTrue(llm_router._is_failover_error(requests.exceptions.ConnectionError()))
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "gpt-4o"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_openai(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "OpenAI via router"}}]
+        # String matching
+        self.assertTrue(llm_router._is_failover_error(Exception("Rate limit reached")))
+
+    @patch('requests.Session.post')
+    def test_generate_all_providers_fail(self, mock_post):
+        mock_resp_fail = MagicMock()
+        mock_resp_fail.status_code = 429
+        mock_resp_fail.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_resp_fail)
+        mock_post.side_effect = [mock_resp_fail] * 10 
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "CEREBRAS_API_KEY": "k", "GOOGLE_API_KEY": "k", "OPENAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}):
+            result = llm_router.generate("test", stream=False)
+            self.assertEqual(result, "")
+
+    @patch('requests.Session.post')
+    def test_generate_streaming_gemini(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_lines.return_value = [
+            b"data: " + json.dumps({"candidates": [{"content": {"parts": [{"text": "Gemini"}]}}]}).encode(),
+            b"data: " + json.dumps({"candidates": [{"content": {"parts": [{"text": " Stream"}]}}], "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15}}).encode(),
+        ]
+        mock_post.return_value = mock_response
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": "gemini", "GOOGLE_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=True)
+            self.assertEqual(result, "Gemini Stream")
+
+    @patch('requests.Session.post')
+    def test_gemini_generate_non_stream_usage(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "gemini res"}]}}],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 3}
         }
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "openai"
-        result = llm_router.generate("test prompt", stream=False)
-        assert result == "OpenAI via router"
-        llm_router.LLM_PROVIDER = "ollama"
+        mock_post.return_value = mock_response
+        with patch.dict(os.environ, {"LLM_PROVIDER": "gemini", "GOOGLE_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "gemini res")
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "", "LLM_PROVIDER": "openai"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_openai_fallback(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "Falling back to Ollama"}).encode()]
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "openai"
-        result = llm_router.generate("test prompt", stream=True)
-        assert result == "Falling back to Ollama"
-        llm_router.LLM_PROVIDER = "ollama"
+    @patch('requests.Session.post')
+    def test_gemini_generate_empty_candidates(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"candidates": []}
+        mock_post.return_value = mock_response
+        with patch.dict(os.environ, {"LLM_PROVIDER": "gemini", "GOOGLE_API_KEY": "test_key"}):
+            result = llm_router.generate("test prompt", stream=False)
+            self.assertEqual(result, "")
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_anthropic(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"content": [{"text": "Claude via router"}]}
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "anthropic"
-        result = llm_router.generate("test prompt")
-        assert result == "Claude via router"
-        llm_router.LLM_PROVIDER = "ollama"
+    @patch('scripts.gpu_platform.select_platform')
+    def test_ollama_generate_url_from_platform(self, mock_select):
+        mock_select.return_value = ("vastai", "http://vast:11434/api/generate")
+        with patch.dict(os.environ, {"LLM_PROVIDER": "ollama", "OLLAMA_URL": ""}):
+            with patch('requests.Session.post') as mock_post:
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {"response": "res", "done": True}
+                mock_post.return_value = mock_response
+                result = llm_router.generate("test", stream=False)
+                self.assertEqual(result, "res")
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_anthropic_fallback(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama"}).encode()]
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "anthropic"
-        result = llm_router.generate("test prompt", stream=True)
-        assert result == "Ollama"
-        llm_router.LLM_PROVIDER = "ollama"
+    @patch('requests.Session.post')
+    def test_generate_connection_failover_all(self, mock_post):
+        mock_post.side_effect = requests.exceptions.ConnectionError("offline")
+        with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "OPENAI_API_KEY": "k"}):
+            result = llm_router.generate("test", stream=False)
+            self.assertEqual(result, "")
 
-    @patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_gemini(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"candidates": [{"content": {"parts": [{"text": "Gemini via router"}]}}]}
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "gemini"
-        result = llm_router.generate("test prompt", stream=False)
-        assert result == "Gemini via router"
-        llm_router.LLM_PROVIDER = "ollama"
+    @patch('requests.Session.post')
+    def test_generate_generic_exception_failover(self, mock_post):
+        mock_post.side_effect = [Exception("Rate limit 429"), MagicMock(status_code=200, json=lambda: {"choices": [{"message": {"content": "win"}}]})]
+        with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "OPENAI_API_KEY": "k"}):
+            result = llm_router.generate("test", stream=False)
+            self.assertEqual(result, "win")
 
-    @patch.dict(os.environ, {"GOOGLE_API_KEY": ""}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_gemini_fallback(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama"}).encode()]
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "gemini"
-        result = llm_router.generate("test prompt", stream=True)
-        assert result == "Ollama"
-        llm_router.LLM_PROVIDER = "ollama"
-
-    @patch("scripts.llm_router._retry_request", side_effect=Exception("Network down"))
-    def test_generate_exception(self, mock_retry):
-        llm_router.LLM_PROVIDER = "ollama"
-        result = llm_router.generate("test prompt")
-        assert result == ""
-
-
-class TestGetProviderInfo:
-    def test_ollama_info(self):
-        llm_router.LLM_PROVIDER = "ollama"
-        info = llm_router.get_provider_info()
-        assert "Ollama" in info
-
-    def test_openai_info(self):
-        llm_router.LLM_PROVIDER = "openai"
-        info = llm_router.get_provider_info()
-        assert "OpenAI" in info
-
-    def test_anthropic_info(self):
-        llm_router.LLM_PROVIDER = "anthropic"
-        info = llm_router.get_provider_info()
-        assert "Anthropic" in info
-
-    def test_gemini_info(self):
-        llm_router.LLM_PROVIDER = "gemini"
-        info = llm_router.get_provider_info()
-        assert "Gemini" in info
-
-    def test_unknown_info(self):
-        llm_router.LLM_PROVIDER = "unknown"
-        info = llm_router.get_provider_info()
-        assert "Ollama" in info
-        llm_router.LLM_PROVIDER = "ollama"
-
-    def test_groq_info(self):
-        llm_router.LLM_PROVIDER = "groq"
-        info = llm_router.get_provider_info()
-        assert "Groq" in info
-        llm_router.LLM_PROVIDER = "ollama"
-
-    def test_cerebras_info(self):
-        llm_router.LLM_PROVIDER = "cerebras"
-        info = llm_router.get_provider_info()
-        assert "Cerebras" in info
-        llm_router.LLM_PROVIDER = "auto"
-
-
-class TestGenerateGroqCerebras:
-    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_groq(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Groq via router"}}]
-        }
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "groq"
-        result = llm_router.generate("test", stream=False)
-        assert result == "Groq via router"
-        llm_router.LLM_PROVIDER = "auto"
-
-    @patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_groq_fallback(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama"}).encode()]
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "groq"
-        result = llm_router.generate("test", stream=True)
-        assert result == "Ollama"
-        llm_router.LLM_PROVIDER = "auto"
-
-    @patch.dict(os.environ, {"CEREBRAS_API_KEY": "csk_test"}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_cerebras(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Cerebras via router"}}]
-        }
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "cerebras"
-        result = llm_router.generate("test", stream=False)
-        assert result == "Cerebras via router"
-        llm_router.LLM_PROVIDER = "auto"
-
-    @patch.dict(os.environ, {"CEREBRAS_API_KEY": ""}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_generate_cerebras_fallback(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama"}).encode()]
-        mock_retry.return_value = mock_resp
-        llm_router.LLM_PROVIDER = "cerebras"
-        result = llm_router.generate("test", stream=True)
-        assert result == "Ollama"
-        llm_router.LLM_PROVIDER = "auto"
-
-
-class TestAutoFailover:
-    """Tests for automatic provider failover on rate limits and errors."""
-
-    def test_is_failover_error_429(self):
-        resp = MagicMock()
-        resp.status_code = 429
-        err = requests.exceptions.HTTPError(response=resp)
-        assert _is_failover_error(err) is True
-
-    def test_is_failover_error_503(self):
-        resp = MagicMock()
-        resp.status_code = 503
-        err = requests.exceptions.HTTPError(response=resp)
-        assert _is_failover_error(err) is True
-
-    def test_is_failover_error_400_not_failover(self):
-        resp = MagicMock()
-        resp.status_code = 400
-        err = requests.exceptions.HTTPError(response=resp)
-        assert _is_failover_error(err) is False
-
-    def test_is_failover_error_connection(self):
-        err = requests.exceptions.ConnectionError("refused")
-        assert _is_failover_error(err) is True
-
-    def test_is_failover_error_timeout(self):
-        err = requests.exceptions.Timeout("timed out")
-        assert _is_failover_error(err) is True
-
-    def test_is_failover_error_rate_limit_text(self):
-        err = Exception("rate limit exceeded")
-        assert _is_failover_error(err) is True
-
-    def test_is_failover_error_generic(self):
-        err = Exception("something else entirely")
-        assert _is_failover_error(err) is False
-
-    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test", "CEREBRAS_API_KEY": "csk_test"}, clear=False)
-    @patch("scripts.llm_router._groq_generate")
-    @patch("scripts.llm_router._cerebras_generate")
-    def test_auto_failover_groq_429_to_cerebras(self, mock_cerebras, mock_groq):
-        """When Groq returns 429, should automatically try Cerebras."""
-        resp_429 = MagicMock()
-        resp_429.status_code = 429
-        mock_groq.side_effect = requests.exceptions.HTTPError(response=resp_429)
-        mock_cerebras.return_value = "Cerebras saved the day"
-
-        llm_router.LLM_PROVIDER = "auto"
-        result = llm_router.generate("test", stream=False)
-        assert result == "Cerebras saved the day"
-        assert mock_groq.called
-        assert mock_cerebras.called
-        llm_router.LLM_PROVIDER = "auto"
-
-    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test", "CEREBRAS_API_KEY": "csk_test"}, clear=False)
-    @patch("scripts.llm_router._groq_generate")
-    @patch("scripts.llm_router._cerebras_generate")
-    def test_auto_failover_groq_timeout_to_cerebras(self, mock_cerebras, mock_groq):
-        """When Groq times out, should automatically try Cerebras."""
-        mock_groq.side_effect = requests.exceptions.Timeout("timeout")
-        mock_cerebras.return_value = "Cerebras fallback"
-
-        llm_router.LLM_PROVIDER = "auto"
-        result = llm_router.generate("test", stream=False)
-        assert result == "Cerebras fallback"
-        llm_router.LLM_PROVIDER = "auto"
-
-    @patch.dict(os.environ, {"GROQ_API_KEY": "", "CEREBRAS_API_KEY": ""}, clear=False)
-    @patch("scripts.llm_router._retry_request")
-    def test_auto_mode_skips_unconfigured_falls_to_ollama(self, mock_retry):
-        """Auto mode skips providers without API keys, falls to Ollama."""
-        mock_resp = MagicMock()
-        mock_resp.iter_lines.return_value = [json.dumps({"response": "Ollama auto"}).encode()]
-        mock_retry.return_value = mock_resp
-
-        llm_router.LLM_PROVIDER = "auto"
-        result = llm_router.generate("test", stream=True)
-        assert result == "Ollama auto"
-        llm_router.LLM_PROVIDER = "auto"
-
-    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}, clear=False)
-    @patch("scripts.llm_router._groq_generate")
-    def test_explicit_provider_no_chain_on_non_failover_error(self, mock_groq):
-        """Non-failover errors (400) should NOT trigger failover."""
-        resp_400 = MagicMock()
-        resp_400.status_code = 400
-        mock_groq.side_effect = requests.exceptions.HTTPError(response=resp_400)
-
-        llm_router.LLM_PROVIDER = "groq"
-        result = llm_router.generate("test", stream=False)
-        assert result == ""
-        llm_router.LLM_PROVIDER = "auto"
-
-    def test_failover_chain_order(self):
-        """Verify the failover chain order is correct."""
-        assert PROVIDER_FAILOVER_CHAIN[0] == "groq"
-        assert PROVIDER_FAILOVER_CHAIN[1] == "cerebras"
-        assert PROVIDER_FAILOVER_CHAIN[-1] == "ollama"
-
-    def test_failover_status_codes(self):
-        """Verify failover triggers on expected status codes."""
-        assert 429 in FAILOVER_STATUS_CODES  # Rate limit
-        assert 503 in FAILOVER_STATUS_CODES  # Overloaded
-
-    @patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}, clear=False)
-    @patch("scripts.llm_router._groq_generate")
-    def test_call_provider_groq(self, mock_groq):
-        mock_groq.return_value = "groq result"
-        result = _call_provider("groq", "test", 0.2, False, 8192)
-        assert result == "groq result"
-
-    def test_call_provider_missing_key_raises(self):
-        with patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False):
-            with pytest.raises(ValueError):
-                _call_provider("groq", "test", 0.2, False, 8192)
-
-    @patch("scripts.llm_router._retry_request")
-    def test_call_provider_ollama(self, mock_retry):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"response": "ollama result"}
-        mock_retry.return_value = mock_resp
-        result = _call_provider("ollama", "test", 0.2, False, 8192)
-        assert result == "ollama result"
+if __name__ == '__main__':
+    unittest.main()

@@ -434,7 +434,7 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
       1. Tries that provider first
       2. If it hits a rate limit or error, fails over through remaining providers
     """
-    provider = LLM_PROVIDER
+    provider = os.getenv("LLM_PROVIDER", "auto").lower()
 
     # Build the failover chain
     if provider == "auto":
@@ -493,7 +493,7 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
 
 def get_provider_info() -> str:
     """Returns a human-readable string describing the active LLM provider."""
-    provider = LLM_PROVIDER
+    provider = os.getenv("LLM_PROVIDER", "auto").lower()
     if provider == "openai":
         return f"OpenAI ({os.getenv('OPENAI_MODEL', 'gpt-4o-mini')})"
     elif provider == "anthropic":

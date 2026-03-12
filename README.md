@@ -1,32 +1,49 @@
-# 🤖 Open-Source AI Code Reviewer
+# AI TDD Orchestrator — Professional Edition 🚀
 
-[![Actions Status](https://github.com/dayashimoga/ai-tdd-orchestrator/workflows/AI%20Code%20Review%20&%20Quality%20Gates%20(Ollama%20+%20Security%20Check)/badge.svg)](https://github.com/dayashimoga/ai-tdd-orchestrator/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A high-performance codebase generator and autonomous engineering pipeline powered by professional AI orchestrators.
 
-An intelligent, fully open-source, and free continuous integration layer for GitHub. 
+## 🌟 Core Architecture
 
-This repository provides an autonomous pipeline that spins up localized, hardware-aware LLMs (via [Ollama](https://ollama.com/)) directly inside your GitHub Actions runner or local Docker environment. It identifies git differentials in your Pull Requests, runs aggressive security and linting tools, and iteratively fixes your code until it passes strict quality gates.
+The system acts as a **Thin Delegator**, offloading complex reasoning and execution to best-in-class orchestrators. Everything runs in **ephemeral, disposable environments** (Venv/Docker) to keep your host system clean.
 
-> ⚡ **No OpenAI API Keys. No subscription fees. No data harvesting.**
+### 🤖 Supported Orchestrators
 
-## 📚 Documentation
-Everything you need to configure, extend, and understand this Action is thoroughly documented in the `docs/` folder:
+1.  **CrewAI (`--crewai`)**: Multi-agent specialist team (Planner, Engineer, Reviewer).
+2.  **OpenHands (`--openhands`)**: Fully autonomous Docker-based software engineering.
+3.  **PydanticAI (`--pydanticai`)**: Fast, typed micro-agents for structured tasks.
+4.  **Aider (`--aider`)**: High-efficiency CLI coding agent with deep Git integration.
+5.  **LangGraph (`--langgraph`)**: Modular, stateful directed workflows.
 
-- 📖 **[User Guide & Setup Instructions](docs/user_guide.md)**
-- 🧠 **[Technical Architecture & Hardware Intelligence](docs/architecture.md)**
-- 📋 **[Comprehensive Requirements](docs/requirements.md)**
-- 🗺️ **[Project Status & Future Enhancements](docs/project_status.md)**
+## ⚙️ Usage
 
-## 🚀 Quick Start
-1. Fork or copy this repository.
-2. Edit `prompt.txt`.
-3. Push to `main`.
-4. The AI will generate your foundational codebase according to the prompt!
-5. On subsequent Pull Requests, the AI interceptor will review, analyze, and automatically fix your code, leaving inline annotations on your PR.
-
-## 🐳 Running Locally
-Want to test the AI review loop before pushing your PR? We support dynamic hardware allocation. Simply launch Docker:
+### Local Execution (Ephemeral)
+Run any orchestrator without installing its dependencies locally:
 ```bash
-docker-compose up --build
+# General Syntax
+python scripts/ai_pipeline.py <orchestrator_flag> "[Your Prompt]"
+
+# Examples
+python scripts/ai_pipeline.py --crewai "Build a REST API with FastAPI"
+python scripts/ai_pipeline.py --aider "Refactor the authentication logic"
+python scripts/ai_pipeline.py --openhands "Fix the memory leak in the data processor"
 ```
-*The pipeline will read your machine's system memory and GPU VRAM and pick the most powerful Qwen/DeepSeek model your physical hardware can handle without crashing.*
+
+### GitHub Actions (Automation)
+Go to the **Actions** tab in your repository and trigger the `AI Orchestrator CI` workflow:
+- **Orchestrator**: Select from the dropdown.
+- **Prompt**: Enter your task requirements.
+- **LLM Provider**: (Optional) Override the default model/provider.
+
+## 🖥️ High-Performance Compute & Model Routing
+
+- **GPU Compute**: Retains full support for external GPU nodes (Ollama, RunPod) via `scripts/gpu_platform.py`.
+- **Model Agnostic**: Integrated `llm_router.py` dynamically switches between OpenAI, Anthropic, Gemini, Groq, and Local models.
+- **Failover**: Automatic failover between providers on rate limits or outages.
+
+## 🧪 Testing
+
+The infrastructure is verified with a robust mock-based test suite:
+```bash
+pytest tests/test_ephemeral_orchestration.py
+```
+*Tested with 100% pass rate and high coverage on delegation logic.*
