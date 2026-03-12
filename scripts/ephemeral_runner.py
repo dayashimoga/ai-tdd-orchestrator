@@ -5,6 +5,11 @@ import shutil
 import tempfile
 import time
 
+# Add project root to sys.path for robust imports
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 def run_ephemeral_orchestration(prompt: str, mode: str = "venv", orchestrator: str = "crewai"):
     """Runs the AI orchestration in a disposable environment."""
     print(f"🚀 Starting {orchestrator} orchestration in {mode} mode...")

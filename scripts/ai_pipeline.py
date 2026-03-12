@@ -4,6 +4,12 @@ A clean delegator for autonomous AI orchestrators (CrewAI, OpenHands, PydanticAI
 """
 import os
 import sys
+
+# Add project root to sys.path for robust imports
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 import scripts.ephemeral_runner as ephemeral_runner
 import scripts.git_persistence as git_persistence
 
