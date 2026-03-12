@@ -66,6 +66,10 @@ def init_repository(path: str, remote_url: Optional[str] = None, token: Optional
 
 def persist_changes(path: str, message: str = "AI Orchestrator: Update generated code"):
     """Adds, commits, and pushes changes to the remote repository."""
+    if not os.path.isdir(path):
+        print(f"WARN: Directory '{path}' not found. Nothing to persist.")
+        return
+
     print(f"INFO: Persisting changes in {path}...")
     
     # Configure user for CI environments if not set

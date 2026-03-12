@@ -43,10 +43,10 @@ def execute_in_venv(prompt: str, orchestrator: str):
         # 3. Install orchestrator-specific dependencies
         print(f"📥 Installing dependencies for {orchestrator} into ephemeral venv...")
         deps = {
-            "crewai": ["crewai", "langchain-community", "pydantic-settings"],
-            "pydanticai": ["pydantic-ai", "logfire"],
+            "crewai": ["crewai", "langchain", "langchain-community", "pydantic-settings", "requests"],
+            "pydanticai": ["pydantic-ai", "logfire", "requests"],
             "aider": ["aider-chat"],
-            "langgraph": ["langgraph", "langchain-openai", "langchain-community"]
+            "langgraph": ["langgraph", "langchain", "langchain-openai", "langchain-community", "requests"]
         }
         
         target_deps = deps.get(orchestrator, [])
