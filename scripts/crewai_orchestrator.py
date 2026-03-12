@@ -2,7 +2,13 @@ import os
 import sys
 from crewai import Agent, Task, Crew, Process
 from langchain_community.llms import Ollama
-from langchain.tools import Tool
+try:
+    from langchain_core.tools import Tool
+except ImportError:
+    try:
+        from langchain.agents import Tool
+    except ImportError:
+        from langchain.tools import Tool
 from typing import List
 
 # Import local modules
