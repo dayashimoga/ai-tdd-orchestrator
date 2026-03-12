@@ -86,6 +86,6 @@ if __name__ == "__main__":
         for i, task in enumerate(data.tasks, 1):
             print(f"{i}. {task}")
     except Exception as e:
-        print(f"❌ PydanticAI failed: {e}")
+        print(f"ERROR: PydanticAI failed: {e}")
         # Fallback to a simple message if the agent fails (e.g. Ollama /v1 not ready)
-        print("💡 Tip: Ensure Ollama is running with 'OLLAMA_ORIGINS=*' if using web browser, or just ensure it's accessible.")
+        print("INFO: Tip: Ensure Ollama is running with 'OLLAMA_ORIGINS=*' if using web browser, or just ensure it's accessible.")

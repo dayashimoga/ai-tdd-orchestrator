@@ -21,7 +21,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 def main() -> None:
     """Main CLI delegator."""
     if len(sys.argv) < 2:
-        print("\n🚀 AI Orchestrator Professional Edition")
+        print("\n[INFO] AI Orchestrator Professional Edition")
         print("------------------------------------------")
         print("Usage:")
         print("  python scripts/ai_pipeline.py <mode> [prompt]")

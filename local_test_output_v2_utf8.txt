@@ -1,0 +1,623 @@
+﻿Collecting crewai
+  Using cached crewai-1.10.1-py3-none-any.whl.metadata (36 kB)
+Collecting langchain
+  Using cached langchain-1.2.12-py3-none-any.whl.metadata (5.7 kB)
+Collecting langchain-community
+  Using cached langchain_community-0.4.1-py3-none-any.whl.metadata (3.0 kB)
+Collecting pydantic-settings
+  Using cached pydantic_settings-2.13.1-py3-none-any.whl.metadata (3.4 kB)
+Collecting requests
+  Using cached requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+Collecting aiosqlite~=0.21.0 (from crewai)
+  Using cached aiosqlite-0.21.0-py3-none-any.whl.metadata (4.3 kB)
+Collecting appdirs~=1.4.4 (from crewai)
+  Using cached appdirs-1.4.4-py2.py3-none-any.whl.metadata (9.0 kB)
+Collecting chromadb~=1.1.0 (from crewai)
+  Using cached chromadb-1.1.1-cp39-abi3-win_amd64.whl.metadata (7.4 kB)
+Collecting click~=8.1.7 (from crewai)
+  Using cached click-8.1.8-py3-none-any.whl.metadata (2.3 kB)
+Collecting httpx~=0.28.1 (from crewai)
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting instructor>=1.3.3 (from crewai)
+  Using cached instructor-1.14.5-py3-none-any.whl.metadata (12 kB)
+Collecting json-repair~=0.25.2 (from crewai)
+  Using cached json_repair-0.25.3-py3-none-any.whl.metadata (7.9 kB)
+Collecting json5~=0.10.0 (from crewai)
+  Using cached json5-0.10.0-py3-none-any.whl.metadata (34 kB)
+Collecting jsonref~=1.1.0 (from crewai)
+  Using cached jsonref-1.1.0-py3-none-any.whl.metadata (2.7 kB)
+Collecting lancedb>=0.29.2 (from crewai)
+  Using cached lancedb-0.29.2-cp39-abi3-win_amd64.whl.metadata (4.8 kB)
+Collecting mcp~=1.26.0 (from crewai)
+  Using cached mcp-1.26.0-py3-none-any.whl.metadata (89 kB)
+Collecting openai<3,>=1.83.0 (from crewai)
+  Using cached openai-2.26.0-py3-none-any.whl.metadata (29 kB)
+Collecting openpyxl~=3.1.5 (from crewai)
+  Using cached openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+Collecting opentelemetry-api~=1.34.0 (from crewai)
+  Using cached opentelemetry_api-1.34.1-py3-none-any.whl.metadata (1.5 kB)
+Collecting opentelemetry-exporter-otlp-proto-http~=1.34.0 (from crewai)
+  Using cached opentelemetry_exporter_otlp_proto_http-1.34.1-py3-none-any.whl.metadata (2.3 kB)
+Collecting opentelemetry-sdk~=1.34.0 (from crewai)
+  Using cached opentelemetry_sdk-1.34.1-py3-none-any.whl.metadata (1.6 kB)
+Collecting pdfplumber~=0.11.4 (from crewai)
+  Using cached pdfplumber-0.11.9-py3-none-any.whl.metadata (43 kB)
+Collecting portalocker~=2.7.0 (from crewai)
+  Using cached portalocker-2.7.0-py2.py3-none-any.whl.metadata (6.8 kB)
+Collecting pydantic-settings
+  Using cached pydantic_settings-2.10.1-py3-none-any.whl.metadata (3.4 kB)
+Collecting pydantic~=2.11.9 (from crewai)
+  Using cached pydantic-2.11.10-py3-none-any.whl.metadata (68 kB)
+Collecting pyjwt<3,>=2.9.0 (from crewai)
+  Using cached pyjwt-2.11.0-py3-none-any.whl.metadata (4.0 kB)
+Collecting python-dotenv~=1.1.1 (from crewai)
+  Using cached python_dotenv-1.1.1-py3-none-any.whl.metadata (24 kB)
+Collecting regex~=2026.1.15 (from crewai)
+  Using cached regex-2026.1.15-cp311-cp311-win_amd64.whl.metadata (41 kB)
+Collecting textual>=7.5.0 (from crewai)
+  Using cached textual-8.1.1-py3-none-any.whl.metadata (9.1 kB)
+Collecting tokenizers<1,>=0.21 (from crewai)
+  Using cached tokenizers-0.22.2-cp39-abi3-win_amd64.whl.metadata (7.4 kB)
+Collecting tomli-w~=1.1.0 (from crewai)
+  Using cached tomli_w-1.1.0-py3-none-any.whl.metadata (5.7 kB)
+Collecting tomli~=2.0.2 (from crewai)
+  Using cached tomli-2.0.2-py3-none-any.whl.metadata (10.0 kB)
+Collecting uv~=0.9.13 (from crewai)
+  Using cached uv-0.9.30-py3-none-win_amd64.whl.metadata (12 kB)
+Collecting langchain-core<2.0.0,>=1.2.10 (from langchain)
+  Using cached langchain_core-1.2.18-py3-none-any.whl.metadata (4.4 kB)
+Collecting langgraph<1.2.0,>=1.1.1 (from langchain)
+  Using cached langgraph-1.1.1-py3-none-any.whl.metadata (7.4 kB)
+Collecting langchain-classic<2.0.0,>=1.0.0 (from langchain-community)
+  Using cached langchain_classic-1.0.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting SQLAlchemy<3.0.0,>=1.4.0 (from langchain-community)
+  Using cached sqlalchemy-2.0.48-cp311-cp311-win_amd64.whl.metadata (9.8 kB)
+Collecting PyYAML<7.0.0,>=5.3.0 (from langchain-community)
+  Using cached pyyaml-6.0.3-cp311-cp311-win_amd64.whl.metadata (2.4 kB)
+Collecting aiohttp<4.0.0,>=3.8.3 (from langchain-community)
+  Using cached aiohttp-3.13.3-cp311-cp311-win_amd64.whl.metadata (8.4 kB)
+Collecting tenacity!=8.4.0,<10.0.0,>=8.1.0 (from langchain-community)
+  Using cached tenacity-9.1.4-py3-none-any.whl.metadata (1.2 kB)
+Collecting dataclasses-json<0.7.0,>=0.6.7 (from langchain-community)
+  Using cached dataclasses_json-0.6.7-py3-none-any.whl.metadata (25 kB)
+Collecting langsmith<1.0.0,>=0.1.125 (from langchain-community)
+  Using cached langsmith-0.7.16-py3-none-any.whl.metadata (15 kB)
+Collecting httpx-sse<1.0.0,>=0.4.0 (from langchain-community)
+  Using cached httpx_sse-0.4.3-py3-none-any.whl.metadata (9.7 kB)
+Collecting numpy>=1.26.2 (from langchain-community)
+  Using cached numpy-2.4.3-cp311-cp311-win_amd64.whl.metadata (6.6 kB)
+Collecting typing-inspection>=0.4.0 (from pydantic-settings)
+  Using cached typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+Collecting charset_normalizer<4,>=2 (from requests)
+  Using cached charset_normalizer-3.4.5-cp311-cp311-win_amd64.whl.metadata (39 kB)
+Collecting idna<4,>=2.5 (from requests)
+  Using cached idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+Collecting urllib3<3,>=1.21.1 (from requests)
+  Using cached urllib3-2.6.3-py3-none-any.whl.metadata (6.9 kB)
+Collecting certifi>=2017.4.17 (from requests)
+  Using cached certifi-2026.2.25-py3-none-any.whl.metadata (2.5 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached aiohappyeyeballs-2.6.1-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting attrs>=17.3.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached attrs-25.4.0-py3-none-any.whl.metadata (10 kB)
+Collecting frozenlist>=1.1.1 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached frozenlist-1.8.0-cp311-cp311-win_amd64.whl.metadata (21 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached multidict-6.7.1-cp311-cp311-win_amd64.whl.metadata (5.5 kB)
+Collecting propcache>=0.2.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached propcache-0.4.1-cp311-cp311-win_amd64.whl.metadata (14 kB)
+Collecting yarl<2.0,>=1.17.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community)
+  Using cached yarl-1.23.0-cp311-cp311-win_amd64.whl.metadata (82 kB)
+Collecting typing_extensions>=4.0 (from aiosqlite~=0.21.0->crewai)
+  Using cached typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting build>=1.0.3 (from chromadb~=1.1.0->crewai)
+  Using cached build-1.4.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting pybase64>=1.4.1 (from chromadb~=1.1.0->crewai)
+  Using cached pybase64-1.4.3-cp311-cp311-win_amd64.whl.metadata (9.1 kB)
+Collecting uvicorn>=0.18.3 (from uvicorn[standard]>=0.18.3->chromadb~=1.1.0->crewai)
+  Using cached uvicorn-0.41.0-py3-none-any.whl.metadata (6.7 kB)
+Collecting posthog<6.0.0,>=2.4.0 (from chromadb~=1.1.0->crewai)
+  Using cached posthog-5.4.0-py3-none-any.whl.metadata (5.7 kB)
+Collecting onnxruntime>=1.14.1 (from chromadb~=1.1.0->crewai)
+  Using cached onnxruntime-1.24.3-cp311-cp311-win_amd64.whl.metadata (5.3 kB)
+Collecting opentelemetry-exporter-otlp-proto-grpc>=1.2.0 (from chromadb~=1.1.0->crewai)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.40.0-py3-none-any.whl.metadata (2.6 kB)
+Collecting pypika>=0.48.9 (from chromadb~=1.1.0->crewai)
+  Using cached pypika-0.51.1-py2.py3-none-any.whl.metadata (51 kB)
+Collecting tqdm>=4.65.0 (from chromadb~=1.1.0->crewai)
+  Using cached tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+Collecting overrides>=7.3.1 (from chromadb~=1.1.0->crewai)
+  Using cached overrides-7.7.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting importlib-resources (from chromadb~=1.1.0->crewai)
+  Using cached importlib_resources-6.5.2-py3-none-any.whl.metadata (3.9 kB)
+Collecting grpcio>=1.58.0 (from chromadb~=1.1.0->crewai)
+  Using cached grpcio-1.78.0-cp311-cp311-win_amd64.whl.metadata (3.9 kB)
+Collecting bcrypt>=4.0.1 (from chromadb~=1.1.0->crewai)
+  Using cached bcrypt-5.0.0-cp39-abi3-win_amd64.whl.metadata (10 kB)
+Collecting typer>=0.9.0 (from chromadb~=1.1.0->crewai)
+  Using cached typer-0.24.1-py3-none-any.whl.metadata (16 kB)
+Collecting kubernetes>=28.1.0 (from chromadb~=1.1.0->crewai)
+  Using cached kubernetes-35.0.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Collecting mmh3>=4.0.1 (from chromadb~=1.1.0->crewai)
+  Using cached mmh3-5.2.1-cp311-cp311-win_amd64.whl.metadata (15 kB)
+Collecting orjson>=3.9.12 (from chromadb~=1.1.0->crewai)
+  Using cached orjson-3.11.7-cp311-cp311-win_amd64.whl.metadata (43 kB)
+Collecting rich>=10.11.0 (from chromadb~=1.1.0->crewai)
+  Using cached rich-14.3.3-py3-none-any.whl.metadata (18 kB)
+Collecting jsonschema>=4.19.0 (from chromadb~=1.1.0->crewai)
+  Using cached jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+Collecting colorama (from click~=8.1.7->crewai)
+  Using cached colorama-0.4.6-py2.py3-none-any.whl.metadata (17 kB)
+Collecting marshmallow<4.0.0,>=3.18.0 (from dataclasses-json<0.7.0,>=0.6.7->langchain-community)
+  Using cached marshmallow-3.26.2-py3-none-any.whl.metadata (7.3 kB)
+Collecting typing-inspect<1,>=0.4.0 (from dataclasses-json<0.7.0,>=0.6.7->langchain-community)
+  Using cached typing_inspect-0.9.0-py3-none-any.whl.metadata (1.5 kB)
+Collecting anyio (from httpx~=0.28.1->crewai)
+  Using cached anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+Collecting httpcore==1.* (from httpx~=0.28.1->crewai)
+  Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting h11>=0.16 (from httpcore==1.*->httpx~=0.28.1->crewai)
+  Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting diskcache>=5.6.3 (from instructor>=1.3.3->crewai)
+  Using cached diskcache-5.6.3-py3-none-any.whl.metadata (20 kB)
+Collecting docstring-parser<1.0,>=0.16 (from instructor>=1.3.3->crewai)
+  Using cached docstring_parser-0.17.0-py3-none-any.whl.metadata (3.5 kB)
+Collecting jinja2<4.0.0,>=3.1.4 (from instructor>=1.3.3->crewai)
+  Using cached jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting jiter<0.12,>=0.6.1 (from instructor>=1.3.3->crewai)
+  Using cached jiter-0.11.1-cp311-cp311-win_amd64.whl.metadata (5.3 kB)
+Collecting pydantic-core<3.0.0,>=2.18.0 (from instructor>=1.3.3->crewai)
+  Using cached pydantic_core-2.42.0-cp311-cp311-win_amd64.whl.metadata (6.7 kB)
+Collecting deprecation (from lancedb>=0.29.2->crewai)
+  Using cached deprecation-2.1.0-py2.py3-none-any.whl.metadata (4.6 kB)
+Collecting packaging (from lancedb>=0.29.2->crewai)
+  Using cached packaging-26.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting pyarrow>=16 (from lancedb>=0.29.2->crewai)
+  Using cached pyarrow-23.0.1-cp311-cp311-win_amd64.whl.metadata (3.1 kB)
+Collecting lance-namespace>=0.3.2 (from lancedb>=0.29.2->crewai)
+  Using cached lance_namespace-0.5.2-py3-none-any.whl.metadata (1.6 kB)
+Collecting langchain-text-splitters<2.0.0,>=1.1.0 (from langchain-classic<2.0.0,>=1.0.0->langchain-community)
+  Using cached langchain_text_splitters-1.1.1-py3-none-any.whl.metadata (3.3 kB)
+Collecting jsonpatch<2.0.0,>=1.33.0 (from langchain-core<2.0.0,>=1.2.10->langchain)
+  Using cached jsonpatch-1.33-py2.py3-none-any.whl.metadata (3.0 kB)
+Collecting uuid-utils<1.0,>=0.12.0 (from langchain-core<2.0.0,>=1.2.10->langchain)
+  Using cached uuid_utils-0.14.1-cp39-abi3-win_amd64.whl.metadata (4.9 kB)
+Collecting langgraph-checkpoint<5.0.0,>=2.1.0 (from langgraph<1.2.0,>=1.1.1->langchain)
+  Using cached langgraph_checkpoint-4.0.1-py3-none-any.whl.metadata (4.9 kB)
+Collecting langgraph-prebuilt<1.1.0,>=1.0.8 (from langgraph<1.2.0,>=1.1.1->langchain)
+  Using cached langgraph_prebuilt-1.0.8-py3-none-any.whl.metadata (5.2 kB)
+Collecting langgraph-sdk<0.4.0,>=0.3.0 (from langgraph<1.2.0,>=1.1.1->langchain)
+  Using cached langgraph_sdk-0.3.11-py3-none-any.whl.metadata (1.6 kB)
+Collecting xxhash>=3.5.0 (from langgraph<1.2.0,>=1.1.1->langchain)
+  Using cached xxhash-3.6.0-cp311-cp311-win_amd64.whl.metadata (13 kB)
+Collecting requests-toolbelt>=1.0.0 (from langsmith<1.0.0,>=0.1.125->langchain-community)
+  Using cached requests_toolbelt-1.0.0-py2.py3-none-any.whl.metadata (14 kB)
+Collecting zstandard>=0.23.0 (from langsmith<1.0.0,>=0.1.125->langchain-community)
+  Using cached zstandard-0.25.0-cp311-cp311-win_amd64.whl.metadata (3.3 kB)
+Collecting python-multipart>=0.0.9 (from mcp~=1.26.0->crewai)
+  Using cached python_multipart-0.0.22-py3-none-any.whl.metadata (1.8 kB)
+Collecting pywin32>=310 (from mcp~=1.26.0->crewai)
+  Using cached pywin32-311-cp311-cp311-win_amd64.whl.metadata (10 kB)
+Collecting sse-starlette>=1.6.1 (from mcp~=1.26.0->crewai)
+  Using cached sse_starlette-3.3.2-py3-none-any.whl.metadata (14 kB)
+Collecting starlette>=0.27 (from mcp~=1.26.0->crewai)
+  Using cached starlette-0.52.1-py3-none-any.whl.metadata (6.3 kB)
+Collecting distro<2,>=1.7.0 (from openai<3,>=1.83.0->crewai)
+  Using cached distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+Collecting sniffio (from openai<3,>=1.83.0->crewai)
+  Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+Collecting et-xmlfile (from openpyxl~=3.1.5->crewai)
+  Using cached et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+Collecting importlib-metadata<8.8.0,>=6.0 (from opentelemetry-api~=1.34.0->crewai)
+  Using cached importlib_metadata-8.7.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting googleapis-common-protos~=1.52 (from opentelemetry-exporter-otlp-proto-http~=1.34.0->crewai)
+  Using cached googleapis_common_protos-1.73.0-py3-none-any.whl.metadata (9.4 kB)
+Collecting opentelemetry-exporter-otlp-proto-common==1.34.1 (from opentelemetry-exporter-otlp-proto-http~=1.34.0->crewai)
+  Using cached opentelemetry_exporter_otlp_proto_common-1.34.1-py3-none-any.whl.metadata (1.9 kB)
+Collecting opentelemetry-proto==1.34.1 (from opentelemetry-exporter-otlp-proto-http~=1.34.0->crewai)
+  Using cached opentelemetry_proto-1.34.1-py3-none-any.whl.metadata (2.4 kB)
+Collecting protobuf<6.0,>=5.0 (from opentelemetry-proto==1.34.1->opentelemetry-exporter-otlp-proto-http~=1.34.0->crewai)
+  Using cached protobuf-5.29.6-cp310-abi3-win_amd64.whl.metadata (592 bytes)
+Collecting opentelemetry-semantic-conventions==0.55b1 (from opentelemetry-sdk~=1.34.0->crewai)
+  Using cached opentelemetry_semantic_conventions-0.55b1-py3-none-any.whl.metadata (2.5 kB)
+Collecting pdfminer.six==20251230 (from pdfplumber~=0.11.4->crewai)
+  Using cached pdfminer_six-20251230-py3-none-any.whl.metadata (4.3 kB)
+Collecting Pillow>=9.1 (from pdfplumber~=0.11.4->crewai)
+  Using cached pillow-12.1.1-cp311-cp311-win_amd64.whl.metadata (9.0 kB)
+Collecting pypdfium2>=4.18.0 (from pdfplumber~=0.11.4->crewai)
+  Using cached pypdfium2-5.6.0-py3-none-win_amd64.whl.metadata (68 kB)
+Collecting cryptography>=36.0.0 (from pdfminer.six==20251230->pdfplumber~=0.11.4->crewai)
+  Using cached cryptography-46.0.5-cp311-abi3-win_amd64.whl.metadata (5.7 kB)
+Collecting annotated-types>=0.6.0 (from pydantic~=2.11.9->crewai)
+  Using cached annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+Collecting pydantic-core<3.0.0,>=2.18.0 (from instructor>=1.3.3->crewai)
+  Using cached pydantic_core-2.33.2-cp311-cp311-win_amd64.whl.metadata (6.9 kB)
+Collecting greenlet>=1 (from SQLAlchemy<3.0.0,>=1.4.0->langchain-community)
+  Using cached greenlet-3.3.2-cp311-cp311-win_amd64.whl.metadata (3.8 kB)
+Collecting markdown-it-py>=2.1.0 (from markdown-it-py[linkify]>=2.1.0->textual>=7.5.0->crewai)
+  Using cached markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+Collecting mdit-py-plugins (from textual>=7.5.0->crewai)
+  Using cached mdit_py_plugins-0.5.0-py3-none-any.whl.metadata (2.8 kB)
+Collecting platformdirs<5,>=3.6.0 (from textual>=7.5.0->crewai)
+  Using cached platformdirs-4.9.4-py3-none-any.whl.metadata (4.7 kB)
+Collecting pygments<3.0.0,>=2.19.2 (from textual>=7.5.0->crewai)
+  Using cached pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+Collecting huggingface-hub<2.0,>=0.16.4 (from tokenizers<1,>=0.21->crewai)
+  Using cached huggingface_hub-1.6.0-py3-none-any.whl.metadata (13 kB)
+Collecting pyproject_hooks (from build>=1.0.3->chromadb~=1.1.0->crewai)
+  Using cached pyproject_hooks-1.2.0-py3-none-any.whl.metadata (1.3 kB)
+Collecting filelock>=3.10.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers<1,>=0.21->crewai)
+  Using cached filelock-3.25.2-py3-none-any.whl.metadata (2.0 kB)
+Collecting fsspec>=2023.5.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers<1,>=0.21->crewai)
+  Using cached fsspec-2026.2.0-py3-none-any.whl.metadata (10 kB)
+Collecting hf-xet<2.0.0,>=1.3.2 (from huggingface-hub<2.0,>=0.16.4->tokenizers<1,>=0.21->crewai)
+  Using cached hf_xet-1.4.0-cp37-abi3-win_amd64.whl.metadata (4.9 kB)
+Collecting zipp>=3.20 (from importlib-metadata<8.8.0,>=6.0->opentelemetry-api~=1.34.0->crewai)
+  Using cached zipp-3.23.0-py3-none-any.whl.metadata (3.6 kB)
+Collecting MarkupSafe>=2.0 (from jinja2<4.0.0,>=3.1.4->instructor>=1.3.3->crewai)
+  Using cached markupsafe-3.0.3-cp311-cp311-win_amd64.whl.metadata (2.8 kB)
+Collecting jsonpointer>=1.9 (from jsonpatch<2.0.0,>=1.33.0->langchain-core<2.0.0,>=1.2.10->langchain)
+  Using cached jsonpointer-3.0.0-py2.py3-none-any.whl.metadata (2.3 kB)
+Collecting jsonschema-specifications>=2023.03.6 (from jsonschema>=4.19.0->chromadb~=1.1.0->crewai)
+  Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+Collecting referencing>=0.28.4 (from jsonschema>=4.19.0->chromadb~=1.1.0->crewai)
+  Using cached referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+Collecting rpds-py>=0.25.0 (from jsonschema>=4.19.0->chromadb~=1.1.0->crewai)
+  Using cached rpds_py-0.30.0-cp311-cp311-win_amd64.whl.metadata (4.2 kB)
+Collecting six>=1.9.0 (from kubernetes>=28.1.0->chromadb~=1.1.0->crewai)
+  Using cached six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Collecting python-dateutil>=2.5.3 (from kubernetes>=28.1.0->chromadb~=1.1.0->crewai)
+  Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Collecting websocket-client!=0.40.0,!=0.41.*,!=0.42.*,>=0.32.0 (from kubernetes>=28.1.0->chromadb~=1.1.0->crewai)
+  Using cached websocket_client-1.9.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting requests-oauthlib (from kubernetes>=28.1.0->chromadb~=1.1.0->crewai)
+  Using cached requests_oauthlib-2.0.0-py2.py3-none-any.whl.metadata (11 kB)
+Collecting durationpy>=0.7 (from kubernetes>=28.1.0->chromadb~=1.1.0->crewai)
+  Using cached durationpy-0.10-py3-none-any.whl.metadata (340 bytes)
+Collecting lance-namespace-urllib3-client==0.5.2 (from lance-namespace>=0.3.2->lancedb>=0.29.2->crewai)
+  Using cached lance_namespace_urllib3_client-0.5.2-py3-none-any.whl.metadata (26 kB)
+Collecting ormsgpack>=1.12.0 (from langgraph-checkpoint<5.0.0,>=2.1.0->langgraph<1.2.0,>=1.1.1->langchain)
+  Using cached ormsgpack-1.12.2-cp311-cp311-win_amd64.whl.metadata (3.3 kB)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.1.0->markdown-it-py[linkify]>=2.1.0->textual>=7.5.0->crewai)
+  Using cached mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Collecting linkify-it-py<3,>=1 (from markdown-it-py[linkify]>=2.1.0->textual>=7.5.0->crewai)
+  Using cached linkify_it_py-2.1.0-py3-none-any.whl.metadata (8.5 kB)
+Collecting flatbuffers (from onnxruntime>=1.14.1->chromadb~=1.1.0->crewai)
+  Using cached flatbuffers-25.12.19-py2.py3-none-any.whl.metadata (1.0 kB)
+Collecting sympy (from onnxruntime>=1.14.1->chromadb~=1.1.0->crewai)
+  Using cached sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+INFO: pip is looking at multiple versions of opentelemetry-exporter-otlp-proto-grpc to determine which version is compatible with other requirements. This could take a while.
+Collecting opentelemetry-exporter-otlp-proto-grpc>=1.2.0 (from chromadb~=1.1.0->crewai)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.39.1-py3-none-any.whl.metadata (2.5 kB)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.39.0-py3-none-any.whl.metadata (2.5 kB)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.38.0-py3-none-any.whl.metadata (2.4 kB)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.37.0-py3-none-any.whl.metadata (2.4 kB)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.36.0-py3-none-any.whl.metadata (2.4 kB)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.35.0-py3-none-any.whl.metadata (2.4 kB)
+  Using cached opentelemetry_exporter_otlp_proto_grpc-1.34.1-py3-none-any.whl.metadata (2.4 kB)
+Collecting backoff>=1.10.0 (from posthog<6.0.0,>=2.4.0->chromadb~=1.1.0->crewai)
+  Using cached backoff-2.2.1-py3-none-any.whl.metadata (14 kB)
+INFO: pip is looking at multiple versions of typer to determine which version is compatible with other requirements. This could take a while.
+Collecting typer>=0.9.0 (from chromadb~=1.1.0->crewai)
+  Using cached typer-0.24.0-py3-none-any.whl.metadata (16 kB)
+  Using cached typer-0.23.2-py3-none-any.whl.metadata (16 kB)
+  Using cached typer-0.23.1-py3-none-any.whl.metadata (16 kB)
+Collecting shellingham>=1.3.0 (from typer>=0.9.0->chromadb~=1.1.0->crewai)
+  Using cached shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Collecting annotated-doc>=0.0.2 (from typer>=0.9.0->chromadb~=1.1.0->crewai)
+  Using cached annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Collecting mypy-extensions>=0.3.0 (from typing-inspect<1,>=0.4.0->dataclasses-json<0.7.0,>=0.6.7->langchain-community)
+  Using cached mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+Collecting httptools>=0.6.3 (from uvicorn[standard]>=0.18.3->chromadb~=1.1.0->crewai)
+  Using cached httptools-0.7.1-cp311-cp311-win_amd64.whl.metadata (3.6 kB)
+Collecting watchfiles>=0.20 (from uvicorn[standard]>=0.18.3->chromadb~=1.1.0->crewai)
+  Using cached watchfiles-1.1.1-cp311-cp311-win_amd64.whl.metadata (5.0 kB)
+Collecting websockets>=10.4 (from uvicorn[standard]>=0.18.3->chromadb~=1.1.0->crewai)
+  Using cached websockets-16.0-cp311-cp311-win_amd64.whl.metadata (7.0 kB)
+Collecting cffi>=2.0.0 (from cryptography>=36.0.0->pdfminer.six==20251230->pdfplumber~=0.11.4->crewai)
+  Using cached cffi-2.0.0-cp311-cp311-win_amd64.whl.metadata (2.6 kB)
+Collecting uc-micro-py (from linkify-it-py<3,>=1->markdown-it-py[linkify]>=2.1.0->textual>=7.5.0->crewai)
+  Using cached uc_micro_py-2.0.0-py3-none-any.whl.metadata (2.2 kB)
+Collecting oauthlib>=3.0.0 (from requests-oauthlib->kubernetes>=28.1.0->chromadb~=1.1.0->crewai)
+  Using cached oauthlib-3.3.1-py3-none-any.whl.metadata (7.9 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy->onnxruntime>=1.14.1->chromadb~=1.1.0->crewai)
+  Using cached mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+Collecting pycparser (from cffi>=2.0.0->cryptography>=36.0.0->pdfminer.six==20251230->pdfplumber~=0.11.4->crewai)
+  Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Using cached crewai-1.10.1-py3-none-any.whl (886 kB)
+Using cached langchain-1.2.12-py3-none-any.whl (112 kB)
+Using cached langchain_community-0.4.1-py3-none-any.whl (2.5 MB)
+Using cached pydantic_settings-2.10.1-py3-none-any.whl (45 kB)
+Using cached requests-2.32.5-py3-none-any.whl (64 kB)
+Using cached aiohttp-3.13.3-cp311-cp311-win_amd64.whl (457 kB)
+Using cached aiosqlite-0.21.0-py3-none-any.whl (15 kB)
+Using cached appdirs-1.4.4-py2.py3-none-any.whl (9.6 kB)
+Using cached certifi-2026.2.25-py3-none-any.whl (153 kB)
+Using cached charset_normalizer-3.4.5-cp311-cp311-win_amd64.whl (142 kB)
+Using cached chromadb-1.1.1-cp39-abi3-win_amd64.whl (19.8 MB)
+Using cached click-8.1.8-py3-none-any.whl (98 kB)
+Using cached dataclasses_json-0.6.7-py3-none-any.whl (28 kB)
+Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+Using cached httpx_sse-0.4.3-py3-none-any.whl (9.0 kB)
+Using cached idna-3.11-py3-none-any.whl (71 kB)
+Using cached instructor-1.14.5-py3-none-any.whl (177 kB)
+Using cached json_repair-0.25.3-py3-none-any.whl (12 kB)
+Using cached json5-0.10.0-py3-none-any.whl (34 kB)
+Using cached jsonref-1.1.0-py3-none-any.whl (9.4 kB)
+Using cached lancedb-0.29.2-cp39-abi3-win_amd64.whl (52.0 MB)
+Using cached langchain_classic-1.0.2-py3-none-any.whl (1.0 MB)
+Using cached langchain_core-1.2.18-py3-none-any.whl (503 kB)
+Using cached langgraph-1.1.1-py3-none-any.whl (167 kB)
+Using cached langsmith-0.7.16-py3-none-any.whl (347 kB)
+Using cached mcp-1.26.0-py3-none-any.whl (233 kB)
+Using cached numpy-2.4.3-cp311-cp311-win_amd64.whl (12.6 MB)
+Using cached openai-2.26.0-py3-none-any.whl (1.1 MB)
+Using cached openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+Using cached opentelemetry_api-1.34.1-py3-none-any.whl (65 kB)
+Using cached opentelemetry_exporter_otlp_proto_http-1.34.1-py3-none-any.whl (17 kB)
+Using cached opentelemetry_exporter_otlp_proto_common-1.34.1-py3-none-any.whl (18 kB)
+Using cached opentelemetry_proto-1.34.1-py3-none-any.whl (55 kB)
+Using cached opentelemetry_sdk-1.34.1-py3-none-any.whl (118 kB)
+Using cached opentelemetry_semantic_conventions-0.55b1-py3-none-any.whl (196 kB)
+Using cached pdfplumber-0.11.9-py3-none-any.whl (60 kB)
+Using cached pdfminer_six-20251230-py3-none-any.whl (6.6 MB)
+Using cached portalocker-2.7.0-py2.py3-none-any.whl (15 kB)
+Using cached pydantic-2.11.10-py3-none-any.whl (444 kB)
+Using cached pydantic_core-2.33.2-cp311-cp311-win_amd64.whl (2.0 MB)
+Using cached pyjwt-2.11.0-py3-none-any.whl (28 kB)
+Using cached python_dotenv-1.1.1-py3-none-any.whl (20 kB)
+Using cached pyyaml-6.0.3-cp311-cp311-win_amd64.whl (158 kB)
+Using cached regex-2026.1.15-cp311-cp311-win_amd64.whl (277 kB)
+Using cached sqlalchemy-2.0.48-cp311-cp311-win_amd64.whl (2.1 MB)
+Using cached tenacity-9.1.4-py3-none-any.whl (28 kB)
+Using cached textual-8.1.1-py3-none-any.whl (719 kB)
+Using cached tokenizers-0.22.2-cp39-abi3-win_amd64.whl (2.7 MB)
+Using cached tomli-2.0.2-py3-none-any.whl (13 kB)
+Using cached tomli_w-1.1.0-py3-none-any.whl (6.4 kB)
+Using cached typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+Using cached urllib3-2.6.3-py3-none-any.whl (131 kB)
+Using cached uv-0.9.30-py3-none-win_amd64.whl (23.4 MB)
+Using cached aiohappyeyeballs-2.6.1-py3-none-any.whl (15 kB)
+Using cached aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Using cached annotated_types-0.7.0-py3-none-any.whl (13 kB)
+Using cached anyio-4.12.1-py3-none-any.whl (113 kB)
+Using cached attrs-25.4.0-py3-none-any.whl (67 kB)
+Using cached bcrypt-5.0.0-cp39-abi3-win_amd64.whl (150 kB)
+Using cached build-1.4.0-py3-none-any.whl (24 kB)
+Using cached diskcache-5.6.3-py3-none-any.whl (45 kB)
+Using cached distro-1.9.0-py3-none-any.whl (20 kB)
+Using cached docstring_parser-0.17.0-py3-none-any.whl (36 kB)
+Using cached frozenlist-1.8.0-cp311-cp311-win_amd64.whl (44 kB)
+Using cached googleapis_common_protos-1.73.0-py3-none-any.whl (297 kB)
+Using cached greenlet-3.3.2-cp311-cp311-win_amd64.whl (230 kB)
+Using cached grpcio-1.78.0-cp311-cp311-win_amd64.whl (4.8 MB)
+Using cached huggingface_hub-1.6.0-py3-none-any.whl (612 kB)
+Using cached importlib_metadata-8.7.1-py3-none-any.whl (27 kB)
+Using cached jinja2-3.1.6-py3-none-any.whl (134 kB)
+Using cached jiter-0.11.1-cp311-cp311-win_amd64.whl (207 kB)
+Using cached jsonpatch-1.33-py2.py3-none-any.whl (12 kB)
+Using cached jsonschema-4.26.0-py3-none-any.whl (90 kB)
+Using cached kubernetes-35.0.0-py2.py3-none-any.whl (2.0 MB)
+Using cached lance_namespace-0.5.2-py3-none-any.whl (12 kB)
+Using cached lance_namespace_urllib3_client-0.5.2-py3-none-any.whl (300 kB)
+Using cached langchain_text_splitters-1.1.1-py3-none-any.whl (35 kB)
+Using cached langgraph_checkpoint-4.0.1-py3-none-any.whl (50 kB)
+Using cached langgraph_prebuilt-1.0.8-py3-none-any.whl (35 kB)
+Using cached langgraph_sdk-0.3.11-py3-none-any.whl (94 kB)
+Using cached markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+Using cached marshmallow-3.26.2-py3-none-any.whl (50 kB)
+Using cached mmh3-5.2.1-cp311-cp311-win_amd64.whl (41 kB)
+Using cached multidict-6.7.1-cp311-cp311-win_amd64.whl (45 kB)
+Using cached onnxruntime-1.24.3-cp311-cp311-win_amd64.whl (12.6 MB)
+Using cached opentelemetry_exporter_otlp_proto_grpc-1.34.1-py3-none-any.whl (18 kB)
+Using cached orjson-3.11.7-cp311-cp311-win_amd64.whl (124 kB)
+Using cached overrides-7.7.0-py3-none-any.whl (17 kB)
+Using cached packaging-26.0-py3-none-any.whl (74 kB)
+Using cached pillow-12.1.1-cp311-cp311-win_amd64.whl (7.0 MB)
+Using cached platformdirs-4.9.4-py3-none-any.whl (21 kB)
+Using cached posthog-5.4.0-py3-none-any.whl (105 kB)
+Using cached propcache-0.4.1-cp311-cp311-win_amd64.whl (41 kB)
+Using cached pyarrow-23.0.1-cp311-cp311-win_amd64.whl (27.5 MB)
+Using cached pybase64-1.4.3-cp311-cp311-win_amd64.whl (35 kB)
+Using cached pygments-2.19.2-py3-none-any.whl (1.2 MB)
+Using cached pypdfium2-5.6.0-py3-none-win_amd64.whl (3.7 MB)
+Using cached pypika-0.51.1-py2.py3-none-any.whl (60 kB)
+Using cached python_multipart-0.0.22-py3-none-any.whl (24 kB)
+Using cached pywin32-311-cp311-cp311-win_amd64.whl (9.5 MB)
+Using cached requests_toolbelt-1.0.0-py2.py3-none-any.whl (54 kB)
+Using cached rich-14.3.3-py3-none-any.whl (310 kB)
+Using cached sse_starlette-3.3.2-py3-none-any.whl (14 kB)
+Using cached starlette-0.52.1-py3-none-any.whl (74 kB)
+Using cached tqdm-4.67.3-py3-none-any.whl (78 kB)
+Using cached typer-0.23.1-py3-none-any.whl (56 kB)
+Using cached typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Using cached typing_inspect-0.9.0-py3-none-any.whl (8.8 kB)
+Using cached uuid_utils-0.14.1-cp39-abi3-win_amd64.whl (187 kB)
+Using cached uvicorn-0.41.0-py3-none-any.whl (68 kB)
+Using cached colorama-0.4.6-py2.py3-none-any.whl (25 kB)
+Using cached xxhash-3.6.0-cp311-cp311-win_amd64.whl (31 kB)
+Using cached yarl-1.23.0-cp311-cp311-win_amd64.whl (87 kB)
+Using cached zstandard-0.25.0-cp311-cp311-win_amd64.whl (506 kB)
+Using cached deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+Using cached et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+Using cached importlib_resources-6.5.2-py3-none-any.whl (37 kB)
+Using cached mdit_py_plugins-0.5.0-py3-none-any.whl (57 kB)
+Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+Using cached annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Using cached backoff-2.2.1-py3-none-any.whl (15 kB)
+Using cached cryptography-46.0.5-cp311-abi3-win_amd64.whl (3.5 MB)
+Using cached durationpy-0.10-py3-none-any.whl (3.9 kB)
+Using cached filelock-3.25.2-py3-none-any.whl (26 kB)
+Using cached fsspec-2026.2.0-py3-none-any.whl (202 kB)
+Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+Using cached hf_xet-1.4.0-cp37-abi3-win_amd64.whl (3.7 MB)
+Using cached httptools-0.7.1-cp311-cp311-win_amd64.whl (86 kB)
+Using cached jsonpointer-3.0.0-py2.py3-none-any.whl (7.6 kB)
+Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+Using cached linkify_it_py-2.1.0-py3-none-any.whl (19 kB)
+Using cached markupsafe-3.0.3-cp311-cp311-win_amd64.whl (15 kB)
+Using cached mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+Using cached ormsgpack-1.12.2-cp311-cp311-win_amd64.whl (117 kB)
+Using cached protobuf-5.29.6-cp310-abi3-win_amd64.whl (435 kB)
+Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Using cached referencing-0.37.0-py3-none-any.whl (26 kB)
+Using cached rpds_py-0.30.0-cp311-cp311-win_amd64.whl (236 kB)
+Using cached shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Using cached six-1.17.0-py2.py3-none-any.whl (11 kB)
+Using cached watchfiles-1.1.1-cp311-cp311-win_amd64.whl (287 kB)
+Using cached websocket_client-1.9.0-py3-none-any.whl (82 kB)
+Using cached websockets-16.0-cp311-cp311-win_amd64.whl (178 kB)
+Using cached zipp-3.23.0-py3-none-any.whl (10 kB)
+Using cached flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Using cached pyproject_hooks-1.2.0-py3-none-any.whl (10 kB)
+Using cached requests_oauthlib-2.0.0-py2.py3-none-any.whl (24 kB)
+Using cached sympy-1.14.0-py3-none-any.whl (6.3 MB)
+Using cached cffi-2.0.0-cp311-cp311-win_amd64.whl (182 kB)
+Using cached mpmath-1.3.0-py3-none-any.whl (536 kB)
+Using cached oauthlib-3.3.1-py3-none-any.whl (160 kB)
+Using cached uc_micro_py-2.0.0-py3-none-any.whl (6.4 kB)
+Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+Installing collected packages: pywin32, pypika, mpmath, flatbuffers, durationpy, appdirs, zstandard, zipp, xxhash, websockets, websocket-client, uv, uuid-utils, urllib3, uc-micro-py, typing_extensions, tomli-w, tomli, tenacity, sympy, sniffio, six, shellingham, rpds-py, regex, PyYAML, python-multipart, python-dotenv, pyproject_hooks, pypdfium2, pyjwt, pygments, pycparser, pybase64, pyarrow, protobuf, propcache, portalocker, platformdirs, Pillow, packaging, overrides, ormsgpack, orjson, oauthlib, numpy, mypy-extensions, multidict, mmh3, mdurl, MarkupSafe, jsonref, jsonpointer, json5, json-repair, jiter, importlib-resources, idna, httpx-sse, httptools, hf-xet, h11, greenlet, fsspec, frozenlist, filelock, et-xmlfile, docstring-parser, distro, diskcache, colorama, charset_normalizer, certifi, bcrypt, backoff, attrs, annotated-types, annotated-doc, aiohappyeyeballs, yarl, typing-inspection, typing-inspect, tqdm, SQLAlchemy, requests, referencing, python-dateutil, pydantic-core, opentelemetry-proto, openpyxl, onnxruntime, marshmallow, markdown-it-py, linkify-it-py, jsonpatch, jinja2, importlib-metadata, httpcore, grpcio, googleapis-common-protos, deprecation, click, cffi, build, anyio, aiosqlite, aiosignal, watchfiles, uvicorn, starlette, rich, requests-toolbelt, requests-oauthlib, pydantic, posthog, opentelemetry-exporter-otlp-proto-common, opentelemetry-api, mdit-py-plugins, jsonschema-specifications, httpx, dataclasses-json, cryptography, aiohttp, typer, textual, sse-starlette, pydantic-settings, pdfminer.six, opentelemetry-semantic-conventions, openai, langsmith, langgraph-sdk, lance-namespace-urllib3-client, kubernetes, jsonschema, pdfplumber, opentelemetry-sdk, mcp, langchain-core, lance-namespace, instructor, huggingface-hub, tokenizers, opentelemetry-exporter-otlp-proto-http, opentelemetry-exporter-otlp-proto-grpc, langgraph-checkpoint, langchain-text-splitters, lancedb, langgraph-prebuilt, langchain-classic, chromadb, langgraph, langchain-community, crewai, langchain
+Successfully installed MarkupSafe-3.0.3 Pillow-12.1.1 PyYAML-6.0.3 SQLAlchemy-2.0.48 aiohappyeyeballs-2.6.1 aiohttp-3.13.3 aiosignal-1.4.0 aiosqlite-0.21.0 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.12.1 appdirs-1.4.4 attrs-25.4.0 backoff-2.2.1 bcrypt-5.0.0 build-1.4.0 certifi-2026.2.25 cffi-2.0.0 charset_normalizer-3.4.5 chromadb-1.1.1 click-8.1.8 colorama-0.4.6 crewai-1.10.1 cryptography-46.0.5 dataclasses-json-0.6.7 deprecation-2.1.0 diskcache-5.6.3 distro-1.9.0 docstring-parser-0.17.0 durationpy-0.10 et-xmlfile-2.0.0 filelock-3.25.2 flatbuffers-25.12.19 frozenlist-1.8.0 fsspec-2026.2.0 googleapis-common-protos-1.73.0 greenlet-3.3.2 grpcio-1.78.0 h11-0.16.0 hf-xet-1.4.0 httpcore-1.0.9 httptools-0.7.1 httpx-0.28.1 httpx-sse-0.4.3 huggingface-hub-1.6.0 idna-3.11 importlib-metadata-8.7.1 importlib-resources-6.5.2 instructor-1.14.5 jinja2-3.1.6 jiter-0.11.1 json-repair-0.25.3 json5-0.10.0 jsonpatch-1.33 jsonpointer-3.0.0 jsonref-1.1.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 kubernetes-35.0.0 lance-namespace-0.5.2 lance-namespace-urllib3-client-0.5.2 lancedb-0.29.2 langchain-1.2.12 langchain-classic-1.0.2 langchain-community-0.4.1 langchain-core-1.2.18 langchain-text-splitters-1.1.1 langgraph-1.1.1 langgraph-checkpoint-4.0.1 langgraph-prebuilt-1.0.8 langgraph-sdk-0.3.11 langsmith-0.7.16 linkify-it-py-2.1.0 markdown-it-py-4.0.0 marshmallow-3.26.2 mcp-1.26.0 mdit-py-plugins-0.5.0 mdurl-0.1.2 mmh3-5.2.1 mpmath-1.3.0 multidict-6.7.1 mypy-extensions-1.1.0 numpy-2.4.3 oauthlib-3.3.1 onnxruntime-1.24.3 openai-2.26.0 openpyxl-3.1.5 opentelemetry-api-1.34.1 opentelemetry-exporter-otlp-proto-common-1.34.1 opentelemetry-exporter-otlp-proto-grpc-1.34.1 opentelemetry-exporter-otlp-proto-http-1.34.1 opentelemetry-proto-1.34.1 opentelemetry-sdk-1.34.1 opentelemetry-semantic-conventions-0.55b1 orjson-3.11.7 ormsgpack-1.12.2 overrides-7.7.0 packaging-26.0 pdfminer.six-20251230 pdfplumber-0.11.9 platformdirs-4.9.4 portalocker-2.7.0 posthog-5.4.0 propcache-0.4.1 protobuf-5.29.6 pyarrow-23.0.1 pybase64-1.4.3 pycparser-3.0 pydantic-2.11.10 pydantic-core-2.33.2 pydantic-settings-2.10.1 pygments-2.19.2 pyjwt-2.11.0 pypdfium2-5.6.0 pypika-0.51.1 pyproject_hooks-1.2.0 python-dateutil-2.9.0.post0 python-dotenv-1.1.1 python-multipart-0.0.22 pywin32-311 referencing-0.37.0 regex-2026.1.15 requests-2.32.5 requests-oauthlib-2.0.0 requests-toolbelt-1.0.0 rich-14.3.3 rpds-py-0.30.0 shellingham-1.5.4 six-1.17.0 sniffio-1.3.1 sse-starlette-3.3.2 starlette-0.52.1 sympy-1.14.0 tenacity-9.1.4 textual-8.1.1 tokenizers-0.22.2 tomli-2.0.2 tomli-w-1.1.0 tqdm-4.67.3 typer-0.23.1 typing-inspect-0.9.0 typing-inspection-0.4.2 typing_extensions-4.15.0 uc-micro-py-2.0.0 urllib3-2.6.3 uuid-utils-0.14.1 uv-0.9.30 uvicorn-0.41.0 watchfiles-1.1.1 websocket-client-1.9.0 websockets-16.0 xxhash-3.6.0 yarl-1.23.0 zipp-3.23.0 zstandard-0.25.0
+python : 
+At line:1 char:1
++ python scripts/ai_pipeline.py --crewai "Test 
+local fix: verify agent  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (: 
+   String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+[notice] A new release of pip is available: 
+24.0 -> 26.0.1
+[notice] To update, run: C:\Users\daya\AppData\
+Local\Temp\ai_orchestrator_39q5c70b\.venv\Scrip
+ts\python.exe -m pip install --upgrade pip
+Error instantiating LLM from unknown object 
+type: Error importing native provider: 
+OPENAI_API_KEY is required
+Traceback (most recent call last):
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\llm.py", line 413, in __new__
+    native_class(model=model_string, 
+provider=provider, **kwargs_copy),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\llms\providers\openai\completion.py", line 
+250, in __init__
+    client_config = self._get_client_params()
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\llms\providers\openai\completion.py", line 
+338, in _get_client_params
+    raise ValueError("OPENAI_API_KEY is 
+required")
+ValueError: OPENAI_API_KEY is required
+
+The above exception was the direct cause of 
+the following exception:
+
+Traceback (most recent call last):
+  File "J:\aigithub\ai-tdd-orchestrator\scripts
+\crewai_orchestrator.py", line 71, in <module>
+    planner = Agent(
+              ^^^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\pyda
+ntic\main.py", line 253, in __init__
+    validated_self = self.__pydantic_validator_
+_.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\agent\internal\meta.py", line 57, in 
+post_init_setup_with_extensions
+    result = original_func(self)
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\agent\core.py", line 255, in post_init_setup
+    self.llm = create_llm(self.llm)
+               ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\utilities\llm_utils.py", line 66, in 
+create_llm
+    raise e
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\utilities\llm_utils.py", line 53, in 
+create_llm
+    return LLM(
+           ^^^^
+  File "C:\Users\daya\AppData\Local\Temp\ai_orc
+hestrator_39q5c70b\.venv\Lib\site-packages\crew
+ai\llm.py", line 418, in __new__
+    raise ImportError(f"Error importing native 
+provider: {e}") from e
+ImportError: Error importing native provider: 
+OPENAI_API_KEY is required
+INFO: No remote URL provided. Skipping state continuity check.
+INFO: Starting crewai orchestration in venv mode...
+INFO: Created temporary environment in: C:\Users\daya\AppData\Local\Temp\ai_orchestrator_39q5c70b
+INFO: Installing dependencies for crewai into ephemeral venv...
+ERROR: Exception during ephemeral execution: Command '['C:\\Users\\daya\\AppData\\Local\\Temp\\ai_orchestrator_39q5c70b\\.venv\\Scripts\\python.exe', 'J:\\aigithub\\ai-tdd-orchestrator\\scripts\\crewai_orchestrator.py', 'Test local fix: verify agent tool validation passes.']' returned non-zero exit status 1.
+INFO: Cleaning up: C:\Users\daya\AppData\Local\Temp\ai_orchestrator_39q5c70b
+INFO: Persisting changes in your_project...
+Traceback (most recent call last):
+  File "J:\aigithub\ai-tdd-orchestrator\scripts
+\git_persistence.py", line 10, in 
+run_git_command
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoft
+wareFoundation.Python.3.11_3.11.2544.0_x64__qbz
+5n2kfra8p0\Lib\subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, 
+process.args,
+subprocess.CalledProcessError: Command 
+'['git', 'add', '.']' returned non-zero exit 
+status 1.
+
+During handling of the above exception, 
+another exception occurred:
+
+Traceback (most recent call last):
+  File "J:\aigithub\ai-tdd-orchestrator\scripts
+\ai_pipeline.py", line 69, in <module>
+    main()
+  File "J:\aigithub\ai-tdd-orchestrator\scripts
+\ai_pipeline.py", line 66, in main
+    
+git_persistence.persist_changes(PROJECT_DIR, 
+commit_msg)
+  File "J:\aigithub\ai-tdd-orchestrator\scripts
+\git_persistence.py", line 82, in 
+persist_changes
+    run_git_command(["add", "."], cwd=path)
+  File "J:\aigithub\ai-tdd-orchestrator\scripts
+\git_persistence.py", line 19, in 
+run_git_command
+    print(f"\u274c Git error: {e.stderr}")
+  File "C:\Program Files\WindowsApps\PythonSoft
+wareFoundation.Python.3.11_3.11.2544.0_x64__qbz
+5n2kfra8p0\Lib\encodings\cp1252.py", line 19, 
+in encode
+    return codecs.charmap_encode(input,self.err
+ors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't 
+encode character '\u274c' in position 0: 
+character maps to <undefined>

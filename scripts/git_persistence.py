@@ -16,7 +16,8 @@ def run_git_command(args: list, cwd: str = ".") -> str:
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        print(f"❌ Git error: {e.stderr}")
+        print(f"ERROR: Git command failed: {e}")
+        print(f"ERROR: Git error: {e.stderr}")
         return ""
 
 def _inject_pat_into_url(url: str, token: Optional[str]) -> str:

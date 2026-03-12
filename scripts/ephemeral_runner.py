@@ -12,7 +12,7 @@ if root_dir not in sys.path:
 
 def run_ephemeral_orchestration(prompt: str, mode: str = "venv", orchestrator: str = "crewai"):
     """Runs the AI orchestration in a disposable environment."""
-    print(f"🚀 Starting {orchestrator} orchestration in {mode} mode...")
+    print(f"INFO: Starting {orchestrator} orchestration in {mode} mode...")
     
     if mode == "venv":
         execute_in_venv(prompt, orchestrator)
@@ -26,7 +26,7 @@ def execute_in_venv(prompt: str, orchestrator: str):
     temp_dir = tempfile.mkdtemp(prefix="ai_orchestrator_")
     venv_dir = os.path.join(temp_dir, ".venv")
     
-    print(f"📁 Created temporary environment in: {temp_dir}")
+    print(f"INFO: Created temporary environment in: {temp_dir}")
     
     try:
         # 1. Create venv
@@ -41,7 +41,7 @@ def execute_in_venv(prompt: str, orchestrator: str):
             pip_exe = os.path.join(venv_dir, "bin", "pip")
             
         # 3. Install orchestrator-specific dependencies
-        print(f"📥 Installing dependencies for {orchestrator} into ephemeral venv...")
+        print(f"INFO: Installing dependencies for {orchestrator} into ephemeral venv...")
         deps = {
             "crewai": ["crewai", "langchain", "langchain-community", "pydantic-settings", "requests"],
             "pydanticai": ["pydantic-ai", "logfire", "requests"],
@@ -78,25 +78,25 @@ def execute_in_venv(prompt: str, orchestrator: str):
         elif orchestrator_path:
             subprocess.run([python_exe, orchestrator_path, prompt], env=env, check=True)
         else:
-            print(f"❌ Error: Could not find runner for {orchestrator}")
+            print(f"ERROR: Could not find runner for {orchestrator}")
             return
         
-        print("✅ Orchestration complete.")
+        print("DONE: Orchestration complete.")
         
     except Exception as e:
-        print(f"❌ Error during ephemeral execution: {e}")
+        print(f"ERROR: Exception during ephemeral execution: {e}")
     finally:
         # 5. Cleanup
-        print(f"🧹 Cleaning up: {temp_dir}")
+        print(f"INFO: Cleaning up: {temp_dir}")
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 def execute_in_docker(prompt: str, orchestrator: str):
     """Runs the orchestration inside an OpenHands Docker container."""
     if orchestrator != "openhands":
-        print(f"⚠️ Docker mode currently only optimized for OpenHands. Skipping {orchestrator}.")
+        print(f"WARN: Docker mode currently only optimized for OpenHands. Skipping {orchestrator}.")
         return
 
-    print("🐳 Initializing OpenHands in Docker mode...")
+    print("INFO: Initializing OpenHands in Docker mode...")
     
     # 1. Configuration for OpenHands
     image = "ghcr.io/all-hands-ai/openhands:0.20"
@@ -120,17 +120,17 @@ def execute_in_docker(prompt: str, orchestrator: str):
         image
     ]
     
-    print(f"🎬 Running OpenHands on workspace: {workspace_path}")
-    print(f"🛠️ Command: {' '.join(docker_cmd)}")
+    print(f"INFO: Running OpenHands on workspace: {workspace_path}")
+    print(f"INFO: Command: {' '.join(docker_cmd)}")
     
     try:
         # Note: OpenHands is an interactive agent, so we normally use -it.
         # In a CI context, we would use headless scripts.
         subprocess.run(docker_cmd, check=True)
-        print("✅ OpenHands execution session complete.")
+        print("DONE: OpenHands execution session complete.")
     except Exception as e:
-        print(f"❌ Docker execution failed: {e}")
-        print("👉 Make sure Docker is running and you have access to ghcr.io.")
+        print(f"ERROR: Docker execution failed: {e}")
+        print("INFO: Make sure Docker is running and you have access to ghcr.io.")
 
 if __name__ == "__main__":
     user_prompt = sys.argv[1] if len(sys.argv) > 1 else "Create a microservice plan for a weather app."
