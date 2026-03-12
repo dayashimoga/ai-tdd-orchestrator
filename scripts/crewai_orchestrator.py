@@ -3,12 +3,9 @@ import sys
 from crewai import Agent, Task, Crew, Process
 from langchain_community.llms import Ollama
 try:
-    from langchain_core.tools import Tool
+    from langchain_core.tools import tool
 except ImportError:
-    try:
-        from langchain.agents import Tool
-    except ImportError:
-        from langchain.tools import Tool
+    from langchain.tools import tool
 from typing import List
 
 # Import local modules
@@ -41,23 +38,20 @@ from scripts.rag_engine import get_rag_context
 from scripts.repo_map import generate_repo_map
 from scripts.visual_qa import run_visual_qa
 
-rag_tool = Tool(
-    name="RAG Knowledge Retrieval",
-    func=lambda q: get_rag_context(q),
-    description="Useful for retrieving context from reference documents and API specs."
-)
+@tool
+def rag_tool(query: str):
+    """Useful for retrieving context from reference documents and API specs."""
+    return get_rag_context(query)
 
-repo_map_tool = Tool(
-    name="Repository Structure Map",
-    func=lambda d: generate_repo_map(d or "."),
-    description="Useful for understanding the overall project structure and finding relevant files."
-)
+@tool
+def repo_map_tool(directory: str):
+    """Useful for understanding the overall project structure and finding relevant files. Pass '.' for root."""
+    return generate_repo_map(directory or ".")
 
-visual_qa_tool = Tool(
-    name="Visual QA Assessment",
-    func=lambda d: run_visual_qa(d or "."),
-    description="Useful for assessing the aesthetic quality of generated HTML/UI files."
-)
+@tool
+def visual_qa_tool(directory: str):
+    """Useful for assessing the aesthetic quality of generated HTML/UI files. Pass '.' for root."""
+    return run_visual_qa(directory or ".")
 
 all_tools = [rag_tool, repo_map_tool, visual_qa_tool]
 
