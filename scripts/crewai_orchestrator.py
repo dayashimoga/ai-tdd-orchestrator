@@ -18,7 +18,14 @@ try:
 except ImportError:
     class LLM: pass
 
+# Use the router-backed LLM for all agents
+# We satisfy CrewAI's internal validation by providing a dummy key if OpenAI isn't being used
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = "not-needed"
+
 class RouterLLM(LLM):
+    """Custom LangChain LLM that routes to our provider-agnostic generator."""
+    
     @property
     def _llm_type(self) -> str:
         return "router_llm"
@@ -26,7 +33,10 @@ class RouterLLM(LLM):
     def _call(self, prompt: str, stop: List[str] = None, **kwargs) -> str:
         return llm_router.generate(prompt, stream=False)
 
-# Use the router-backed LLM for all agents
+    @property
+    def _identifying_params(self) -> dict:
+        return {"name_of_model": "router_llm"}
+
 local_llm = RouterLLM()
 
 # --- Specialized Tools Integration ---

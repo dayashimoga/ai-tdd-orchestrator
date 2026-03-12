@@ -99,7 +99,12 @@ LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "auto").lower()
 # Provider Failover Chain — tried in order when LLM_PROVIDER="auto"
 # ---------------------------------------------------------------------------
 # Free API providers first (no GPU needed), then Ollama (local/cloud GPU)
-PROVIDER_FAILOVER_CHAIN = ["groq", "cerebras", "gemini", "openai", "anthropic", "ollama"]
+# Provider Failover Chain — tried in order when LLM_PROVIDER="auto"
+# 1. Ultra-fast Free API providers (Groq/Cerebras)
+# 2. High-quality Free API (Gemini)
+# 3. Local/Free GPU Platforms (Ollama)
+# 4. Paid flagship providers (OpenAI/Anthropic) as final resort
+PROVIDER_FAILOVER_CHAIN = ["groq", "cerebras", "gemini", "ollama", "openai", "anthropic"]
 
 # Map provider → (env_key_for_api_key, env_key_for_model, default_model, generate_fn_name)
 PROVIDER_CONFIG = {
@@ -447,11 +452,18 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
 
     last_error = None
     for i, prov in enumerate(chain):
+        # Pre-check for API keys to avoid unnecessary noise/validation errors
+        if prov != "ollama":
+            key_var = PROVIDER_CONFIG[prov][0]
+            if not os.getenv(key_var):
+                if provider != "auto" and prov == provider:
+                    print(f"  \u274c Error: {key_var} not set for explicitly requested provider {prov.upper()}")
+                continue
+
         try:
             return _call_provider(prov, prompt, temperature, stream, num_ctx)
-        except ValueError:
-            # API key not set — skip, but log it so the user knows why
-            print(f"  ⏭️  Skipping {prov.upper()}: API key not configured")
+        except ValueError as e:
+            # This handles cases where _call_provider might still raise for missing keys
             continue
         except requests.exceptions.HTTPError as e:
             last_error = e
@@ -494,15 +506,29 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
 def get_provider_info() -> str:
     """Returns a human-readable string describing the active LLM provider."""
     provider = os.getenv("LLM_PROVIDER", "auto").lower()
-    if provider == "openai":
+    
+    active = provider
+    if provider == "auto":
+        # Check failover chain for first available key
+        active = "ollama" # Default
+        for p in PROVIDER_FAILOVER_CHAIN:
+            if p == "ollama":
+                active = "ollama"
+                break
+            key_var = PROVIDER_CONFIG[p][0]
+            if os.getenv(key_var):
+                active = p
+                break
+
+    if active == "openai":
         return f"OpenAI ({os.getenv('OPENAI_MODEL', 'gpt-4o-mini')})"
-    elif provider == "anthropic":
+    elif active == "anthropic":
         return f"Anthropic ({os.getenv('ANTHROPIC_MODEL', 'claude-3-haiku-20240307')})"
-    elif provider == "gemini":
+    elif active == "gemini":
         return f"Google Gemini ({os.getenv('GOOGLE_MODEL', 'gemini-1.5-flash')})"
-    elif provider == "groq":
+    elif active == "groq":
         return f"Groq ({os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')})"
-    elif provider == "cerebras":
-        return f"Cerebras ({os.getenv('CEREBRAS_MODEL', 'llama3.1-70b')})"
+    elif active == "cerebras":
+        return f"Cerebras ({os.getenv('CEREBRAS_MODEL', 'llama3.1-8b')})"
     else:
         return f"Ollama ({os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:3b')})"

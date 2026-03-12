@@ -57,7 +57,7 @@ class TestCLIDelegation(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 ai_pipeline.main()
             self.assertEqual(cm.exception.code, 1)
-            mock_print.assert_any_call('❌ Unknown mode: --unknown')
+            mock_print.assert_any_call('ERROR: Unknown mode: --unknown')
 
 class TestEphemeralRunner(unittest.TestCase):
     """Tests for the ephemeral runner lifecycle."""
@@ -112,7 +112,7 @@ class TestEphemeralRunner(unittest.TestCase):
     @patch('builtins.print')
     def test_execute_in_docker_failure(self, mock_print, mock_makedirs, mock_subrun):
         ephemeral_runner.execute_in_docker("test prompt", "openhands")
-        mock_print.assert_any_call('❌ Docker execution failed: Docker failed')
+        mock_print.assert_any_call('ERROR: Docker execution failed: Docker failed')
 
     @patch('subprocess.run', side_effect=Exception("Venv failed"))
     @patch('tempfile.mkdtemp', return_value='/tmp/mock_venv')
@@ -120,7 +120,7 @@ class TestEphemeralRunner(unittest.TestCase):
     @patch('builtins.print')
     def test_execute_in_venv_failure(self, mock_print, mock_rmtree, mock_mkdtemp, mock_subrun):
         ephemeral_runner.execute_in_venv("test prompt", "crewai")
-        mock_print.assert_any_call('❌ Error during ephemeral execution: Venv failed')
+        mock_print.assert_any_call('ERROR: Exception during ephemeral execution: Venv failed')
 
     @patch('scripts.ephemeral_runner.execute_in_venv')
     def test_run_ephemeral_orchestration_venv(self, mock_venv):

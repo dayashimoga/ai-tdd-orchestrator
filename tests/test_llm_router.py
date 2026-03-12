@@ -137,6 +137,8 @@ class TestLLMRouter(unittest.TestCase):
             # Reduce backoff for speed in tests
             with patch('scripts.llm_router.BACKOFF_BASE', 0.01):
                 result = llm_router.generate("prompt", stream=False)
+                # The chain is [groq, cerebras, gemini, ...]
+                # mock_post.side_effect is [429 (groq), 500 (cerebras)x3, 200 (gemini)] -> gemini wins
                 self.assertEqual(result, "gemini win")
 
     def test_get_provider_info(self):
@@ -304,8 +306,13 @@ class TestLLMRouter(unittest.TestCase):
 
     @patch('requests.Session.post')
     def test_generate_generic_exception_failover(self, mock_post):
-        mock_post.side_effect = [Exception("Rate limit 429"), MagicMock(status_code=200, json=lambda: {"choices": [{"message": {"content": "win"}}]})]
-        with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "OPENAI_API_KEY": "k"}):
+        # mock_post side effect for chain [groq, cerebras, gemini, ollama, openai, ...]
+        # [Exception (groq), success (cerebras)] -> cerebras wins
+        mock_post.side_effect = [
+            Exception("Rate limit 429"), 
+            MagicMock(status_code=200, json=lambda: {"choices": [{"message": {"content": "win"}}]})
+        ]
+        with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "CEREBRAS_API_KEY": "k"}):
             result = llm_router.generate("test", stream=False)
             self.assertEqual(result, "win")
 

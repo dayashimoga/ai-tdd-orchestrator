@@ -58,7 +58,7 @@ def main() -> None:
     elif mode_flag == "--langgraph":
         ephemeral_runner.run_ephemeral_orchestration(prompt_text, mode="venv", orchestrator="langgraph")
     else:
-        print(f"❌ Unknown mode: {mode_flag}")
+        print(f"ERROR: Unknown mode: {mode_flag}")
         sys.exit(1)
 
     # --- PERSISTENCE: Push generated code ---
