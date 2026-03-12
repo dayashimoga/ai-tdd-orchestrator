@@ -52,6 +52,51 @@ def _check_repo_exists_github(url: str, token: Optional[str]) -> bool:
         print(f"WARN: Failed to check repo existence on GitHub: {e}")
         return False
 
+def _create_repo_github(url: str, token: Optional[str]) -> bool:
+    """Creates the repository on GitHub if it doesn't exist."""
+    if "github.com" not in url or not token:
+        return False
+    
+    parts = url.rstrip("/").split("/")
+    if len(parts) < 2:
+        return False
+    
+    repo_name = parts[-1].replace(".git", "")
+    owner = parts[-2]
+    
+    # Try creating as user repo first, then as org repo if owner is different?
+    # Actually, simpler to just use the token's context.
+    api_url = "https://api.github.com/user/repos"
+    payload = {
+        "name": repo_name,
+        "private": True,
+        "auto_init": False
+    }
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    try:
+        print(f"INFO: Attempting to create repository '{repo_name}' on GitHub...")
+        resp = requests.post(api_url, headers=headers, json=payload, timeout=10)
+        if resp.status_code == 201:
+            print(f"DONE: Repository '{repo_name}' created successfully.")
+            return True
+        else:
+            # Maybe it belongs to an organization?
+            org_api_url = f"https://api.github.com/orgs/{owner}/repos"
+            resp = requests.post(org_api_url, headers=headers, json=payload, timeout=10)
+            if resp.status_code == 201:
+                print(f"DONE: Repository '{repo_name}' created in organization '{owner}'.")
+                return True
+            
+        print(f"WARN: Failed to create repo: {resp.status_code} - {resp.text}")
+        return False
+    except Exception as e:
+        print(f"ERROR: Exception during repo creation: {e}")
+        return False
+
 def init_repository(path: str, remote_url: Optional[str] = None, token: Optional[str] = None):
     """Initializes a git repository and sets up the remote with PAT."""
     if not os.path.exists(os.path.join(path, ".git")):
@@ -122,7 +167,11 @@ def ensure_state_continuity(path: str, remote_url: Optional[str] = None, token: 
         # Use subprocess directly for clone as it's not in a cwd yet
         subprocess.run(["git", "clone", authed_url, path], check=True)
     else:
-        print(f"INFO: Repository NOT found on GitHub. Creating local workspace at {path}...")
+        print(f"INFO: Repository NOT found on GitHub. Initializing state...")
+        if token:
+            _create_repo_github(remote_url, token)
+        
+        print(f"INFO: Creating local workspace at {path}...")
         os.makedirs(path, exist_ok=True)
         init_repository(path, remote_url, token)
 

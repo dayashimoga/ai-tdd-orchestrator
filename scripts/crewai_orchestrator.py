@@ -18,17 +18,16 @@ try:
 except ImportError:
     class LLM: pass
 
-# Use the router-backed LLM for all agents
-# We satisfy CrewAI's internal validation by providing a dummy key if OpenAI isn't being used
-if not os.getenv("OPENAI_API_KEY"):
-    os.environ["OPENAI_API_KEY"] = "not-needed"
-
 class RouterLLM(LLM):
     """Custom LangChain LLM that routes to our provider-agnostic generator."""
     
+    model_name: str = "router-v1"
+    
     @property
     def _llm_type(self) -> str:
-        return "router_llm"
+        # We use "ollama" type to prevent CrewAI from triggering OpenAI-specific 
+        # validation/SDK logic which causes 401 errors in CI.
+        return "ollama"
 
     def _call(self, prompt: str, stop: List[str] = None, **kwargs) -> str:
         return llm_router.generate(prompt, stream=False)

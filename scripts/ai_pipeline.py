@@ -17,9 +17,11 @@ import scripts.git_persistence as git_persistence
 PROJECT_DIR = os.getenv("TARGET_PROJECT_DIR", "your_project")
 TARGET_REPO_URL = os.getenv("TARGET_REPO_URL")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_USER = os.getenv("GITHUB_USER", "dayashimoga") # Default fallback
 
 def main() -> None:
     """Main CLI delegator."""
+    global PROJECT_DIR, TARGET_REPO_URL
     if len(sys.argv) < 2:
         print("\n[INFO] AI Orchestrator Professional Edition")
         print("------------------------------------------")
@@ -36,13 +38,39 @@ def main() -> None:
 
     mode_flag = sys.argv[1]
     
-    # Get prompt
+    # Argument parsing (simple)
+    args = sys.argv[2:]
     prompt_text = "Standard software engineering task."
-    if len(sys.argv) > 2:
-        prompt_text = " ".join(sys.argv[2:])
-    elif os.path.exists("prompt.txt"):
+    repo_name = None
+    
+    i = 0
+    while i < len(args):
+        if args[i] == "--prompt" and i + 1 < len(args):
+            prompt_text = args[i+1]
+            i += 2
+        elif args[i] == "--repo" and i + 1 < len(args):
+            repo_name = args[i+1]
+            i += 2
+        else:
+            # Assume it's part of the prompt if not a flag
+            if i == 0 and not args[i].startswith("--"):
+                prompt_text = " ".join(args)
+                break
+            i += 1
+
+    if repo_name:
+        PROJECT_DIR = repo_name
+        if not TARGET_REPO_URL:
+            # Construct a default URL if token is present
+            TARGET_REPO_URL = f"https://github.com/{GITHUB_USER}/{repo_name}.git"
+
+    if not prompt_text and os.path.exists("prompt.txt"):
         with open("prompt.txt", "r") as f:
             prompt_text = f.read().strip()
+
+    print(f"INFO: Orchestrator Mode: {mode_flag}")
+    print(f"INFO: Target Project: {PROJECT_DIR}")
+    print(f"INFO: Repository URL: {TARGET_REPO_URL or 'Local'}")
 
     # --- STATE CONTINUITY: Pull latest changes ---
     git_persistence.ensure_state_continuity(PROJECT_DIR, TARGET_REPO_URL, GITHUB_TOKEN)

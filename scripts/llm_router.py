@@ -100,11 +100,11 @@ LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "auto").lower()
 # ---------------------------------------------------------------------------
 # Free API providers first (no GPU needed), then Ollama (local/cloud GPU)
 # Provider Failover Chain — tried in order when LLM_PROVIDER="auto"
-# 1. Ultra-fast Free API providers (Groq/Cerebras)
+# 1. Ultra-fast Free API providers (Groq/Cerebras/Lighthouse)
 # 2. High-quality Free API (Gemini)
 # 3. Local/Free GPU Platforms (Ollama)
 # 4. Paid flagship providers (OpenAI/Anthropic) as final resort
-PROVIDER_FAILOVER_CHAIN = ["groq", "cerebras", "gemini", "ollama", "openai", "anthropic"]
+PROVIDER_FAILOVER_CHAIN = ["groq", "cerebras", "lighthouse", "gemini", "ollama", "openai", "anthropic"]
 
 # Map provider → (env_key_for_api_key, env_key_for_model, default_model, generate_fn_name)
 PROVIDER_CONFIG = {
@@ -113,6 +113,7 @@ PROVIDER_CONFIG = {
     "openai":    ("OPENAI_API_KEY",     "OPENAI_MODEL",    "gpt-4o-mini"),
     "anthropic": ("ANTHROPIC_API_KEY",  "ANTHROPIC_MODEL", "claude-3-haiku-20240307"),
     "gemini":    ("GOOGLE_API_KEY",     "GOOGLE_MODEL",    "gemini-1.5-flash"),
+    "lighthouse": ("LIGHTHOUSE_API_KEY", "LIGHTHOUSE_MODEL", "llama-3-70b-turbo"),
 }
 
 # Errors that trigger automatic failover (don't retry, move to next provider)
@@ -399,6 +400,15 @@ def _call_provider(provider: str, prompt: str, temperature: float,
         print(f"\U0001f916 [GEMINI] model={model}")
         return _gemini_generate(prompt, model, api_key, temperature, stream)
 
+    elif provider == "lighthouse":
+        api_key = os.getenv("LIGHTHOUSE_API_KEY", "")
+        model = os.getenv("LIGHTHOUSE_MODEL", "llama-3-70b-turbo")
+        base_url = os.getenv("LIGHTHOUSE_URL", "https://api.lighthouse.ai/v1") # Placeholder
+        if not api_key:
+            raise ValueError("LIGHTHOUSE_API_KEY not set")
+        print(f"\U0001f916 [LIGHTHOUSE] model={model}")
+        return _openai_compatible_generate(prompt, model, api_key, base_url, temperature, stream)
+
     else:  # ollama
         ollama_url = os.getenv("OLLAMA_URL") or ""
         if not ollama_url:
@@ -530,5 +540,7 @@ def get_provider_info() -> str:
         return f"Groq ({os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')})"
     elif active == "cerebras":
         return f"Cerebras ({os.getenv('CEREBRAS_MODEL', 'llama3.1-8b')})"
+    elif active == "lighthouse":
+        return f"Lighthouse ({os.getenv('LIGHTHOUSE_MODEL', 'llama-3-70b-turbo')})"
     else:
         return f"Ollama ({os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:3b')})"
