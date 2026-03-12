@@ -1,9 +1,8 @@
 import os
 import sys
 from crewai import Agent, Task, Crew, Process
-from langchain_community.llms import Ollama
-from langchain.tools import BaseTool
 from typing import List, Optional, Type
+from pydantic import BaseModel, Field
 
 # Import local modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -35,34 +34,44 @@ from scripts.rag_engine import get_rag_context
 from scripts.repo_map import generate_repo_map
 from scripts.visual_qa import run_visual_qa
 
-class RAGTool(BaseTool):
-    name: str = "rag_knowledge_retrieval"
-    description: str = "Useful for retrieving context from reference documents and API specs."
+# Try to use CrewAI's own tool decorator if available, fallback to LangChain's
+try:
+    from crewai.tools import tool
+except ImportError:
+    try:
+        from langchain_core.tools import tool
+    except ImportError:
+        from langchain.tools import tool
 
-    def _run(self, query: str) -> str:
-        return get_rag_context(query)
+# Pydantic models for tool arguments (improves validation in Pydantic v2)
+class QueryInput(BaseModel):
+    query: str = Field(..., description="The query string to search for.")
 
-class RepoMapTool(BaseTool):
-    name: str = "repository_structure_map"
-    description: str = "Useful for understanding the overall project structure. Pass '.' for root."
+class DirectoryInput(BaseModel):
+    directory: str = Field(".", description="The directory to analyze. Use '.' for root.")
 
-    def _run(self, directory: str) -> str:
-        return generate_repo_map(directory or ".")
+@tool("rag_knowledge_retrieval")
+def rag_tool(query: str):
+    """Useful for retrieving context from reference documents and API specs."""
+    return get_rag_context(query)
 
-class VisualQATool(BaseTool):
-    name: str = "visual_qa_assessment"
-    description: str = "Useful for assessing the aesthetic quality of generated HTML/UI files. Pass '.' for root."
+@tool("repository_structure_map")
+def repo_map_tool(directory: str = "."):
+    """Useful for understanding the overall project structure. Returns a file tree with signatures."""
+    return generate_repo_map(directory)
 
-    def _run(self, directory: str) -> str:
-        return run_visual_qa(directory or ".")
+@tool("visual_qa_assessment")
+def visual_qa_tool(directory: str = "."):
+    """Useful for assessing the aesthetic quality of generated HTML/UI files via computer vision."""
+    return run_visual_qa(directory)
 
-all_tools = [RAGTool(), RepoMapTool(), VisualQATool()]
+all_tools = [rag_tool, repo_map_tool, visual_qa_tool]
 
 # 1. Define Agents
 planner = Agent(
     role='Lead Software Planner',
     goal='Create a comprehensive and technically sound implementation plan based on user requirements.',
-    backstory='You are an expert software architect with decades of experience in TDD and system design. You break down complex requirements into atomic, testable tasks.',
+    backstory='You are an expert software architect with decades of experience in TDD and system design.',
     llm=local_llm,
     verbose=True,
     allow_delegation=False
@@ -71,7 +80,7 @@ planner = Agent(
 engineer = Agent(
     role='Senior Software Engineer',
     goal='Write high-quality, production-ready code and comprehensive unit tests to satisfy the requirements.',
-    backstory='You are a coding prodigy specialized in Python and TDD. You write clean, efficient code and always ensure 90%+ test coverage.',
+    backstory='You are a coding prodigy specialized in Python and TDD. You write clean, efficient code.',
     llm=local_llm,
     verbose=True,
     allow_delegation=False,
@@ -80,8 +89,8 @@ engineer = Agent(
 
 reviewer = Agent(
     role='Principal Quality Engineer',
-    goal='Review the generated code for security, performance, and adherence to the plan. Ensure tests pass and coverage is met.',
-    backstory='You are a meticulous reviewer who finds even the most subtle bugs and security vulnerabilities. You enforce strict quality gates.',
+    goal='Review the generated code for security, performance, and adherence to the plan.',
+    backstory='You are a meticulous reviewer who finds even the most subtle bugs and vulnerabilities.',
     llm=local_llm,
     verbose=True,
     allow_delegation=False
@@ -90,21 +99,21 @@ reviewer = Agent(
 # 2. Define Tasks
 def run_orchestration(user_prompt: str):
     plan_task = Task(
-        description=f"Analyze the following requirements and create a detailed Markdown checklist of implementation steps: {user_prompt}",
+        description=f"Analyze requirements and create a technical checklist: {user_prompt}",
         expected_output="A markdown checklist of technical tasks including unit testing requirements.",
         agent=planner
     )
 
     coding_task = Task(
-        description="Based on the approved plan, implement the necessary code and unit tests. Ensure the code is production-ready.",
-        expected_output="The full source code and test files in a structured format.",
+        description="Implement the code and unit tests based on the plan. Ensure production quality.",
+        expected_output="The full source code and test files.",
         agent=engineer,
         context=[plan_task]
     )
 
     review_task = Task(
-        description="Review the implemented code and tests. Verify that all requirements are met and that the coverage is sufficient.",
-        expected_output="A summary of the review results and a confirmation if the code passes the quality gates.",
+        description="Review the implemented code and tests. Verify requirements and quality.",
+        expected_output="A summary of the review results. PASS/FAIL.",
         agent=reviewer,
         context=[coding_task]
     )
@@ -120,11 +129,7 @@ def run_orchestration(user_prompt: str):
     return crew.kickoff()
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        prompt = sys.argv[1]
-    else:
-        prompt = "Create a simple calculator API with basic arithmetic operations."
-    
+    prompt = sys.argv[1] if len(sys.argv) > 1 else "Build a simple calculator API."
     result = run_orchestration(prompt)
     print("\n\n########################")
     print("## ORCHESTRATION RESULT")
