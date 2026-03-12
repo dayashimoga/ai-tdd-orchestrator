@@ -2,11 +2,8 @@ import os
 import sys
 from crewai import Agent, Task, Crew, Process
 from langchain_community.llms import Ollama
-try:
-    from langchain_core.tools import tool
-except ImportError:
-    from langchain.tools import tool
-from typing import List
+from langchain.tools import BaseTool
+from typing import List, Optional, Type
 
 # Import local modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -38,22 +35,28 @@ from scripts.rag_engine import get_rag_context
 from scripts.repo_map import generate_repo_map
 from scripts.visual_qa import run_visual_qa
 
-@tool
-def rag_tool(query: str):
-    """Useful for retrieving context from reference documents and API specs."""
-    return get_rag_context(query)
+class RAGTool(BaseTool):
+    name: str = "rag_knowledge_retrieval"
+    description: str = "Useful for retrieving context from reference documents and API specs."
 
-@tool
-def repo_map_tool(directory: str):
-    """Useful for understanding the overall project structure and finding relevant files. Pass '.' for root."""
-    return generate_repo_map(directory or ".")
+    def _run(self, query: str) -> str:
+        return get_rag_context(query)
 
-@tool
-def visual_qa_tool(directory: str):
-    """Useful for assessing the aesthetic quality of generated HTML/UI files. Pass '.' for root."""
-    return run_visual_qa(directory or ".")
+class RepoMapTool(BaseTool):
+    name: str = "repository_structure_map"
+    description: str = "Useful for understanding the overall project structure. Pass '.' for root."
 
-all_tools = [rag_tool, repo_map_tool, visual_qa_tool]
+    def _run(self, directory: str) -> str:
+        return generate_repo_map(directory or ".")
+
+class VisualQATool(BaseTool):
+    name: str = "visual_qa_assessment"
+    description: str = "Useful for assessing the aesthetic quality of generated HTML/UI files. Pass '.' for root."
+
+    def _run(self, directory: str) -> str:
+        return run_visual_qa(directory or ".")
+
+all_tools = [RAGTool(), RepoMapTool(), VisualQATool()]
 
 # 1. Define Agents
 planner = Agent(
