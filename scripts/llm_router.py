@@ -116,6 +116,14 @@ PROVIDER_CONFIG = {
     "lighthouse": ("LIGHTHOUSE_API_KEY", "LIGHTHOUSE_MODEL", "llama-3-70b-turbo"),
 }
 
+def _has_oci_credits() -> bool:
+    """Check if OCI credits are available."""
+    try:
+        from scripts.gpu_platform import check_oci_credits
+        return check_oci_credits()
+    except (ImportError, Exception):
+        return False
+
 # Errors that trigger automatic failover (don't retry, move to next provider)
 FAILOVER_STATUS_CODES = {
     401,  # Unauthorized (Invalid API Key)
@@ -471,7 +479,7 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
             key_var = PROVIDER_CONFIG[prov][0]
             api_key = os.getenv(key_var)
             if not api_key:
-                # print(f"DEBUG: Skipping {prov} (missing {key_var})")
+                print(f"DEBUG: Skipping {prov} (missing {key_var})")
                 continue
             print(f"DEBUG: Attempting {prov} (key found)")
 
@@ -549,4 +557,17 @@ def get_provider_info() -> str:
     elif active == "lighthouse":
         return f"Lighthouse ({os.getenv('LIGHTHOUSE_MODEL', 'llama-3-70b-turbo')})"
     else:
-        return f"Ollama ({os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:3b')})"
+        # Check platform info for Ollama
+        try:
+            from scripts.gpu_platform import select_platform, get_platform_info
+            platform_key, _ = select_platform(use_failover=False)
+            info = get_platform_info(platform_key)
+            platform_name = info.get("name", "Ollama")
+            
+            # Special indicator for OCI Credits
+            if platform_key == "oracle" and _has_oci_credits():
+                platform_name += " [CREDIT UTILIZATION]"
+                
+            return f"{platform_name} ({os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:3b')})"
+        except (ImportError, Exception):
+            return f"Ollama ({os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:3b')})"

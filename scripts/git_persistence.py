@@ -68,34 +68,41 @@ def _create_repo_github(url: str, token: Optional[str]) -> bool:
     repo_name = parts[-1].replace(".git", "")
     owner = parts[-2]
     
-    # Try creating as user repo first, then as org repo if owner is different?
-    # Actually, simpler to just use the token's context.
-    api_url = "https://api.github.com/user/repos"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
     payload = {
         "name": repo_name,
         "private": True,
         "auto_init": False
     }
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
+
     try:
-        print(f"INFO: Attempting to create repository '{repo_name}' on GitHub...")
-        resp = requests.post(api_url, headers=headers, json=payload, timeout=10)
+        print(f"INFO: Attempting to create repository '{repo_name}' on GitHub (as user)...")
+        # Try creating as a user repository (POST /user/repos)
+        resp = requests.post("https://api.github.com/user/repos", headers=headers, json=payload, timeout=10)
+        
         if resp.status_code == 201:
-            print(f"DONE: Repository '{repo_name}' created successfully.")
+            print(f"DONE: Repository '{repo_name}' created successfully as a user repo.")
             return True
-        else:
-            # Maybe it belongs to an organization?
-            org_api_url = f"https://api.github.com/orgs/{owner}/repos"
-            resp = requests.post(org_api_url, headers=headers, json=payload, timeout=10)
-            if resp.status_code == 201:
-                print(f"DONE: Repository '{repo_name}' created in organization '{owner}'.")
-                return True
+        elif resp.status_code == 422:
+            print(f"INFO: Repository '{repo_name}' already exists (or name conflict).")
+            return True
+        
+        # If user repo creation failed with something other than already exists, try org
+        print(f"DEBUG: User repo creation returned {resp.status_code}. Checking if '{owner}' is an organization...")
+        org_api_url = f"https://api.github.com/orgs/{owner}/repos"
+        resp_org = requests.post(org_api_url, headers=headers, json=payload, timeout=10)
+        
+        if resp_org.status_code == 201:
+            print(f"DONE: Repository '{repo_name}' created in organization '{owner}'.")
+            return True
+        elif resp_org.status_code == 422:
+            print(f"INFO: Repository '{repo_name}' already exists in organization '{owner}'.")
+            return True
             
-        print(f"WARN: Failed to create repo: {resp.status_code} - {resp.text}")
+        print(f"WARN: Failed to create repo: {resp_org.status_code} - {resp_org.text}")
         return False
     except Exception as e:
         print(f"ERROR: Exception during repo creation: {e}")

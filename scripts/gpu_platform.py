@@ -138,7 +138,7 @@ PLATFORMS: Dict[str, Dict] = {
     },
 }
 
-# Failover priority: free GPU platforms first, free CPU second, then paid
+# Failover priority: free GPU platforms first, then OCI (if healthy), then CPU, then paid
 FAILOVER_ORDER: List[str] = [
     "colab", "kaggle", "lighthouse", "lightning", "huggingface", "sagemaker",
     "paperspace", "saturn", "oracle",
@@ -160,11 +160,37 @@ def health_check(url: str, timeout: int = 5) -> bool:
     """Checks if an Ollama endpoint is alive and responding."""
     try:
         # Hit the /api/tags endpoint (lightweight) to check health
-        tags_url = url.replace("/api/generate", "/api/tags")
+        tags_url = url.split("?")[0].rstrip("/") # Strip query params if any
+        if not tags_url.endswith("/api/tags") and not tags_url.endswith("/api/generate"):
+             tags_url += "/api/tags"
+        elif tags_url.endswith("/api/generate"):
+             tags_url = tags_url.replace("/api/generate", "/api/tags")
+             
         resp = requests.get(tags_url, timeout=timeout)
         return resp.status_code == 200
     except Exception:
         return False
+
+
+def _check_platform_health(item: Tuple[str, str]) -> Optional[Tuple[str, str]]:
+    """Helper for parallel health checks."""
+    key, resolved = item
+    if health_check(resolved):
+        return key, resolved
+    return None
+
+
+def check_oci_credits() -> bool:
+    """Helper to check if OCI credits are available."""
+    try:
+        import scripts.oci_manager as oci_manager
+    except ImportError:
+        try:
+            import oci_manager
+        except ImportError:
+            return False
+            
+    return oci_manager.check_oci_credits() > 0
 
 
 def detect_platform() -> Tuple[str, str]:
@@ -219,27 +245,37 @@ def detect_with_failover() -> Tuple[str, str]:
     if not candidates:
         return "local", "http://localhost:11434/api/generate"
 
-    # 3. Parallel health check all candidates at once
+    # 3. Parallel health check all candidates
     print(f"[GPU] Checking {len(candidates)} platforms in parallel...")
-
-    def _check(item: Tuple[str, str]) -> Optional[Tuple[str, str]]:
-        key, resolved = item
-        if health_check(resolved):
-            return key, resolved
-        return None
-
+    
+    results = {}
     with ThreadPoolExecutor(max_workers=min(len(candidates), 5)) as pool:
-        futures = {pool.submit(_check, c): c for c in candidates}
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                key, resolved = result
-                print(f"[GPU] Connected: {PLATFORMS[key]['name']} ({PLATFORMS[key]['gpu']})")
-                return key, resolved
+        future_to_key = {pool.submit(_check_platform_health, c): c[0] for c in candidates}
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                res = future.result()
+                if res:
+                    results[key] = res[1] # Store resolved URL
+            except Exception:
+                pass
 
-    # 4. Fallback to local
-    tried = [c[0] for c in candidates]
-    print(f"[GPU] All remote platforms down ({', '.join(tried)}). Falling back to local Ollama.")
+    # 4. Strict Prioritization based on FAILOVER_ORDER
+    has_credits = check_oci_credits()
+    
+    # Special case: If OCI has credits and is healthy, it is the ABSOLUTE priority (A10 GPU)
+    if "oracle" in results and has_credits:
+         print(f"[GPU] Connected: {PLATFORMS['oracle']['name']} (PRIORITY UTILIZATION - Credits Available)")
+         return "oracle", results["oracle"]
+
+    # Otherwise, return the first healthy one in FAILOVER_ORDER
+    for key in FAILOVER_ORDER:
+        if key in results:
+            print(f"[GPU] Connected: {PLATFORMS[key]['name']} ({PLATFORMS[key]['gpu']})")
+            return key, results[key]
+
+    # 5. Fallback to local
+    print(f"[GPU] All remote platforms down or unconfigured. Falling back to local Ollama.")
     return "local", "http://localhost:11434/api/generate"
 
 
