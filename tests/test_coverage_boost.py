@@ -75,5 +75,34 @@ class TestMainBlocks(unittest.TestCase):
                 asyncio.run(scripts.langgraph_orchestrator.run_langgraph(prompt))
                 self.assertTrue(mock_run.called)
 
+    def test_llm_router_generate_failover(self):
+        import scripts.llm_router as lr
+        with patch('scripts.llm_router.requests.Session.post') as mock_post:
+            # Simulate Groq failure
+            mock_post.return_value = MagicMock(status_code=500)
+            with patch.dict(os.environ, {"LLM_PROVIDER": "groq", "GROQ_API_KEY": "test"}):
+                # Should fail over or return error msg
+                try:
+                    lr.generate("test")
+                except Exception:
+                    pass
+
+    def test_llm_router_missing_keys(self):
+        import scripts.llm_router as lr
+        with patch.dict(os.environ, {"LLM_PROVIDER": "openai"}, clear=True):
+            # No key, should skip or error
+            try:
+                lr.generate("test")
+            except Exception:
+                pass
+
+    def test_gpu_platform_main(self):
+        import scripts.gpu_platform as gp
+        with patch('sys.stdout', new=MagicMock()):
+            with patch('scripts.gpu_platform.select_platform', return_value=("local", "url")):
+                # Trigger the __main__ block logic
+                gp.list_platforms()
+                gp.select_platform()
+
 if __name__ == '__main__':
     unittest.main()

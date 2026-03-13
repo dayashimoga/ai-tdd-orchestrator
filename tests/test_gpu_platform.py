@@ -158,6 +158,37 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("Kaggle", output)
         self.assertIn("FREE", output)
 
+class TestCoverageGap(unittest.TestCase):
+    """Tests to fill coverage gaps in gpu_platform.py."""
+
+    @patch('requests.get', side_effect=Exception("Failed"))
+    def test_health_check_exception(self, mock_get):
+        self.assertFalse(gpu_platform.health_check("http://bad-url"))
+
+    def test_detect_platform_with_env(self):
+        with patch.dict(os.environ, {"COLAB_OLLAMA_URL": "http://colab"}):
+            p, url = gpu_platform.detect_platform()
+            self.assertEqual(p, "colab")
+            self.assertEqual(url, "http://colab/api/generate")
+
+    @patch('scripts.gpu_platform.health_check', return_value=True)
+    def test_detect_with_failover_parallel(self, mock_hc):
+        with patch.dict(os.environ, {"COLAB_OLLAMA_URL": "http://colab", "KAGGLE_OLLAMA_URL": "http://kaggle"}):
+            p, url = gpu_platform.detect_with_failover()
+            self.assertIn(p, ["colab", "kaggle"]) # Parallel choice
+
+    @patch('scripts.gpu_platform.health_check', return_value=False)
+    def test_detect_with_failover_all_down(self, mock_hc):
+        with patch.dict(os.environ, {"COLAB_OLLAMA_URL": "http://colab"}):
+            p, url = gpu_platform.detect_with_failover()
+            self.assertEqual(p, "local")
+
+    def test_select_platform_manual(self):
+        with patch.dict(os.environ, {"GPU_PLATFORM": "colab", "COLAB_OLLAMA_URL": "http://colab"}):
+            p, url = gpu_platform.select_platform()
+            self.assertEqual(p, "colab")
+            self.assertEqual(url, "http://colab")
+
 
 if __name__ == '__main__':
     unittest.main()

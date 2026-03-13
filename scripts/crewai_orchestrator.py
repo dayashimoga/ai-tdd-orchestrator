@@ -12,31 +12,52 @@ import scripts.llm_router as llm_router
 MODEL_NAME = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
 OLLAMA_URL = os.getenv("OLLAMA_URL") or "http://localhost:11434"
 
-# Custom LangChain LLM wrapper for our Provider-Agnostic Router
+# Robust BaseChatModel implementation that routes to our provider-agnostic generator.
+# This avoids CrewAI's default OpenAI validation by spoofing an Ollama-type model.
 try:
-    from langchain_core.language_models.llms import LLM
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
+    from langchain_core.outputs import ChatResult, ChatGeneration
 except ImportError:
-    class LLM: pass
+    class BaseChatModel: 
+        def __init__(self, **kwargs): pass
+    class BaseMessage: pass
+    class AIMessage:
+        def __init__(self, content, **kwargs): self.content = content
+    class HumanMessage: pass
+    class ChatResult:
+        def __init__(self, generations): self.generations = generations
+    class ChatGeneration:
+        def __init__(self, message): self.message = message
 
-class RouterLLM(LLM):
-    """Custom LangChain LLM that routes to our provider-agnostic generator."""
+class RouterChatModel(BaseChatModel):
+    """Custom ChatModel that routes to our provider-agnostic generator."""
     
-    model_name: str = "router-v1"
+    # Required for Pydantic validation in some LangChain/CrewAI versions
+    model_name: str = "router-chat-v1"
     
     @property
     def _llm_type(self) -> str:
-        # We use "ollama" type to prevent CrewAI from triggering OpenAI-specific 
-        # validation/SDK logic which causes 401 errors in CI.
-        return "ollama"
+        return "ollama-chat"
 
-    def _call(self, prompt: str, stop: List[str] = None, **kwargs) -> str:
-        return llm_router.generate(prompt, stream=False)
+    def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, **kwargs) -> ChatResult:
+        # Construct simplified prompt from messages
+        prompt = ""
+        for m in messages:
+            role = "User" if getattr(m, 'type', 'human') == "human" else "Assistant"
+            if getattr(m, 'type', '') == "system": role = "System"
+            content = getattr(m, 'content', str(m))
+            prompt += f"{role}: {content}\n"
+        prompt += "Assistant: "
+        
+        response_text = llm_router.generate(prompt, stream=False)
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=response_text))])
 
     @property
     def _identifying_params(self) -> dict:
-        return {"name_of_model": "router_llm"}
+        return {"name_of_model": "router_chat_llm"}
 
-local_llm = RouterLLM()
+local_llm = RouterChatModel()
 
 # --- Specialized Tools Integration ---
 from scripts.rag_engine import get_rag_context
@@ -132,9 +153,11 @@ def run_orchestration(user_prompt: str):
         agents=[planner, engineer, reviewer],
         tasks=[plan_task, coding_task, review_task],
         process=Process.sequential,
-        verbose=True
+        verbose=True,
+        planning=False, # Explicitly disable planning to avoid OpenAI default
     )
 
+    print(f"DEBUG: Using custom router LLM: {getattr(local_llm, 'model', 'unknown')}")
     return crew.kickoff()
 
 if __name__ == "__main__":

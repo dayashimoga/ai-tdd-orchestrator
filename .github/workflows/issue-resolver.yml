@@ -115,7 +115,7 @@ jobs:
 
       - name: Cache Ollama Models
         if: env.LOCAL_OLLAMA_REQUIRED == 'true'
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.ollama/models
           key: ${{ runner.os }}-ollama-models

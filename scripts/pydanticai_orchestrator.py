@@ -21,10 +21,10 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").lower()
 
 if LLM_PROVIDER == "openai":
     from pydantic_ai.models.openai import OpenAIModel
-    model = OpenAIModel(os.getenv("OPENAI_MODEL", "gpt-4o-mini"), api_key=os.getenv("OPENAI_API_KEY"))
+    model = OpenAIModel(os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
 elif LLM_PROVIDER == "anthropic":
     from pydantic_ai.models.anthropic import AnthropicModel
-    model = AnthropicModel(os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307"), api_key=os.getenv("ANTHROPIC_API_KEY"))
+    model = AnthropicModel(os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307"))
 else:
     # Default to Ollama/OpenAI-compatible local endpoint
     from pydantic_ai.models.openai import OpenAIModel
@@ -48,6 +48,8 @@ agent = Agent(
         "Use the RAG tool for context and the Repo Map tool to understand the codebase."
     )
 )
+
+agent.model_provider = LLM_PROVIDER
 
 # --- Specialized Tools ---
 from scripts.rag_engine import get_rag_context

@@ -14,10 +14,10 @@ on:
           - --pydanticai
           - --aider
           - --langgraph
-      prompt:
-        description: 'The prompt or task for the AI'
+      repo_name:
+        description: 'Target Repository Name (will be created if missing)'
         required: true
-        default: 'Run a standard software engineering scan and fix.'
+        default: 'your_project'
       llm_provider:
         description: 'LLM Provider'
         required: true
@@ -30,8 +30,10 @@ on:
           - anthropic
           - gemini
           - groq
+          - cerebras
+          - lighthouse
       ollama_model:
-        description: 'Ollama Model (if using Ollama)'
+        description: 'Ollama Model'
         default: 'qwen2.5-coder:3b'
 
 jobs:
@@ -51,6 +53,97 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests PyGithub
 
+      - name: Check Remote GPU Availability
+        id: gpu_scan
+        env:
+          GPU_PLATFORM: ${{ secrets.GPU_PLATFORM || 'auto' }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'ollama' }}
+          OLLAMA_URL: ${{ secrets.OLLAMA_URL || '' }}
+          COLAB_OLLAMA_URL: ${{ secrets.COLAB_OLLAMA_URL || '' }}
+          KAGGLE_OLLAMA_URL: ${{ secrets.KAGGLE_OLLAMA_URL || '' }}
+          VASTAI_OLLAMA_URL: ${{ secrets.VASTAI_OLLAMA_URL || '' }}
+          RUNPOD_OLLAMA_URL: ${{ secrets.RUNPOD_OLLAMA_URL || '' }}
+          LIGHTNING_OLLAMA_URL: ${{ secrets.LIGHTNING_OLLAMA_URL || '' }}
+          HF_OLLAMA_URL: ${{ secrets.HF_OLLAMA_URL || '' }}
+          ORACLE_OLLAMA_URL: ${{ secrets.ORACLE_OLLAMA_URL || '' }}
+          SAGEMAKER_OLLAMA_URL: ${{ secrets.SAGEMAKER_OLLAMA_URL || '' }}
+          PAPERSPACE_OLLAMA_URL: ${{ secrets.PAPERSPACE_OLLAMA_URL || '' }}
+          SATURN_OLLAMA_URL: ${{ secrets.SATURN_OLLAMA_URL || '' }}
+          CODESPACES_OLLAMA_URL: ${{ secrets.CODESPACES_OLLAMA_URL || '' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY || '' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
+          CUSTOM_OLLAMA_URL: ${{ secrets.CUSTOM_OLLAMA_URL || '' }}
+        run: |
+          python scripts/select_model.py > output.log
+          MODEL_NAME=$(tail -n 1 output.log)
+          echo "SELECTED_MODEL=$MODEL_NAME" >> $GITHUB_ENV
+
+          cat << 'EOF' > check_gpu.py
+          import sys, os
+          
+          # Check for Cloud Providers first
+          provider = os.getenv("LLM_PROVIDER", "auto").lower()
+          cloud_configs = [
+              ("groq", "GROQ_API_KEY"),
+              ("cerebras", "CEREBRAS_API_KEY"),
+              ("openai", "OPENAI_API_KEY"),
+              ("anthropic", "ANTHROPIC_API_KEY"),
+              ("gemini", "GOOGLE_API_KEY"),
+          ]
+          has_cloud = False
+          if provider == "auto":
+              for name, key in cloud_configs:
+                  if os.getenv(key):
+                      print(f"✅ Found cloud provider ({name}) via auto failover.")
+                      has_cloud = True
+                      break
+          else:
+              for name, key in cloud_configs:
+                  if provider == name and os.getenv(key):
+                      print(f"✅ Found explicit cloud provider: {name}")
+                      has_cloud = True
+                      break
+                      
+          if has_cloud:
+              sys.exit(0)
+
+          # Fallback to checking remote Ollama GPU
+          sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
+          import scripts.gpu_platform as gpu_platform
+          platform, url = gpu_platform.select_platform()
+          if platform != "local":
+              print(f"✅ Found active remote GPU: {platform}")
+              sys.exit(0)
+          sys.exit(1)
+          EOF
+
+          if python check_gpu.py; then
+            echo "Skipping local Ollama installation to save CI time."
+            echo "LOCAL_OLLAMA_REQUIRED=false" >> $GITHUB_ENV
+          else
+            echo "LOCAL_OLLAMA_REQUIRED=true" >> $GITHUB_ENV
+          fi
+
+      - name: Cache Ollama Models
+        if: env.LOCAL_OLLAMA_REQUIRED == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ${{ runner.os }}-ollama-models
+          restore-keys: |
+            ${{ runner.os }}-ollama-
+
+      - name: Install Local Ollama
+        if: env.LOCAL_OLLAMA_REQUIRED == 'true'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull ${{ env.SELECTED_MODEL }}
+
       - name: Run Orchestrator
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,8 +152,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          LIGHTHOUSE_API_KEY: ${{ secrets.LIGHTHOUSE_API_KEY }}
           LLM_PROVIDER: ${{ github.event.inputs.llm_provider }}
-          OLLAMA_MODEL: ${{ github.event.inputs.ollama_model }}
+          OLLAMA_MODEL: ${{ env.SELECTED_MODEL }}
           OLLAMA_URL: ${{ secrets.OLLAMA_URL }}
+          GITHUB_USER: ${{ github.repository_owner }}
         run: |
-          python scripts/ai_pipeline.py ${{ github.event.inputs.orchestrator }} "${{ github.event.inputs.prompt }}"
+          python scripts/ai_pipeline.py ${{ github.event.inputs.orchestrator }} --prompt "${{ github.event.inputs.prompt }}" --repo "${{ github.event.inputs.repo_name }}"

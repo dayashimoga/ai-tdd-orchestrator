@@ -16,8 +16,10 @@ def run_git_command(args: list, cwd: str = ".") -> str:
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: Git command failed: {e}")
-        print(f"ERROR: Git error: {e.stderr}")
+        # Don't print error if it's a routine check failure (like rev-parse)
+        if args[0] not in ["rev-parse", "config", "remote"]:
+            print(f"ERROR: Git command failed: {' '.join(args)}")
+            print(f"ERROR: Git error: {e.stderr}")
         return ""
 
 def _inject_pat_into_url(url: str, token: Optional[str]) -> str:
@@ -46,7 +48,9 @@ def _check_repo_exists_github(url: str, token: Optional[str]) -> bool:
     headers = {"Authorization": f"token {token}"} if token else {}
     
     try:
+        print(f"DEBUG: Checking if repo exists at {api_url}...")
         resp = requests.get(api_url, headers=headers, timeout=10)
+        print(f"DEBUG: GitHub Response: {resp.status_code}")
         return resp.status_code == 200
     except Exception as e:
         print(f"WARN: Failed to check repo existence on GitHub: {e}")
@@ -164,12 +168,14 @@ def ensure_state_continuity(path: str, remote_url: Optional[str] = None, token: 
     # Check if repo exists on GitHub to decide between clone or init
     if _check_repo_exists_github(remote_url, token):
         print(f"INFO: Repository found on GitHub. Cloning into {path}...")
-        # Use subprocess directly for clone as it's not in a cwd yet
         subprocess.run(["git", "clone", authed_url, path], check=True)
     else:
         print(f"INFO: Repository NOT found on GitHub. Initializing state...")
         if token:
-            _create_repo_github(remote_url, token)
+            if _create_repo_github(remote_url, token):
+                 # Give GitHub a moment to propagate
+                 import time
+                 time.sleep(2)
         
         print(f"INFO: Creating local workspace at {path}...")
         os.makedirs(path, exist_ok=True)

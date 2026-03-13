@@ -129,11 +129,18 @@ PLATFORMS: Dict[str, Dict] = {
         "free": None,
         "gpu": "User-defined",
     },
+    "lighthouse": {
+        "name": "Lighthouse GPU (Free)",
+        "env_var": "LIGHTHOUSE_OLLAMA_URL",
+        "description": "Free GPU platform (Lighthouse)",
+        "free": True,
+        "gpu": "Various (Free)",
+    },
 }
 
 # Failover priority: free GPU platforms first, free CPU second, then paid
 FAILOVER_ORDER: List[str] = [
-    "colab", "kaggle", "lightning", "huggingface", "sagemaker",
+    "colab", "kaggle", "lighthouse", "lightning", "huggingface", "sagemaker",
     "paperspace", "saturn", "oracle",
     "groq", "cerebras",          # Free LLM APIs (no Ollama needed)
     "cloudshell", "codespaces",  # Free CPU-only fallbacks

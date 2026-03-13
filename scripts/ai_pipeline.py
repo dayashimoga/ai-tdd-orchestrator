@@ -40,7 +40,7 @@ def main() -> None:
     
     # Argument parsing (simple)
     args = sys.argv[2:]
-    prompt_text = "Standard software engineering task."
+    prompt_text = None
     repo_name = None
     
     i = 0
@@ -67,6 +67,10 @@ def main() -> None:
     if not prompt_text and os.path.exists("prompt.txt"):
         with open("prompt.txt", "r") as f:
             prompt_text = f.read().strip()
+    
+    # Final fallback if still empty
+    if not prompt_text:
+        prompt_text = "Standard software engineering task."
 
     print(f"INFO: Orchestrator Mode: {mode_flag}")
     print(f"INFO: Target Project: {PROJECT_DIR}")

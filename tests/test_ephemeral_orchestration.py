@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 import subprocess
+import importlib
 from unittest.mock import patch, MagicMock, mock_open
 
 # Add repository root to Python path
@@ -170,14 +171,22 @@ class TestOrchestratorLogic(unittest.TestCase):
             p.stop()
 
     @patch('scripts.llm_router.generate', return_value='test response')
-    def test_router_llm_crewai(self, mock_gen):
-        # We need to ensure LLM is mocked correctly for inheritance
-        with patch('langchain_core.language_models.llms.LLM', MagicMock):
+    def test_router_chat_model_crewai(self, mock_gen):
+        # Mock BaseChatModel dependencies
+        with patch('langchain_core.language_models.chat_models.BaseChatModel', MagicMock):
             import scripts.crewai_orchestrator as crew_orch
-            llm = crew_orch.RouterLLM()
-            res = llm._call("hello")
-            self.assertEqual(res, 'test response')
-            mock_gen.assert_called_once_with('hello', stream=False)
+            importlib.reload(crew_orch)
+            model = crew_orch.RouterChatModel()
+            
+            # Simple mock message
+            class MockMessage:
+                def __init__(self, content, type="human"):
+                    self.content = content
+                    self.type = type
+            
+            res = model._generate([MockMessage("hello")])
+            self.assertEqual(res.generations[0].message.content, 'test response')
+            self.assertIn('hello', mock_gen.call_args[0][0])
 
     @patch('scripts.crewai_orchestrator.run_orchestration')
     def test_crewai_orchestration(self, mock_run):

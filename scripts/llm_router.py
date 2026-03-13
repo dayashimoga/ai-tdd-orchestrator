@@ -378,9 +378,10 @@ def _call_provider(provider: str, prompt: str, temperature: float,
 
     elif provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY", "")
+        # Robust check: skip if key is empty or a common placeholder used to trick validation
+        if not api_key or api_key.lower() in ["not-needed", "empty", "your-key-here"]:
+            raise ValueError("No valid OpenAI API key found. Skipping provider.")
         model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not set")
         print(f"\U0001f916 [OPENAI] model={model}")
         return _openai_generate(prompt, model, api_key, temperature, stream)
 
@@ -414,11 +415,13 @@ def _call_provider(provider: str, prompt: str, temperature: float,
         if not ollama_url:
             try:
                 from scripts.gpu_platform import select_platform
-                _, ollama_url = select_platform(use_failover=False)
-            except Exception:
+                # Use failover=True to actually try to find a live free GPU platform (Colab, Kaggle, etc.)
+                _, ollama_url = select_platform(use_failover=True)
+            except Exception as e:
+                print(f"DEBUG: GPU detection failed: {e}. Falling back to default.")
                 ollama_url = "http://localhost:11434/api/generate"
         model = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
-        print(f"\U0001f916 [OLLAMA] model={model}")
+        print(f"\U0001f916 [OLLAMA] model={model} @ {ollama_url}")
         return _ollama_generate(prompt, model, ollama_url, temperature, num_ctx, stream)
 
 
@@ -451,24 +454,25 @@ def generate(prompt: str, stream: bool = True, temperature: float = 0.2,
     """
     provider = os.getenv("LLM_PROVIDER", "auto").lower()
 
-    # Build the failover chain
+    # Start with the chosen provider, then failover through the rest
     if provider == "auto":
-        chain = list(PROVIDER_FAILOVER_CHAIN)  # groq → cerebras → ... → ollama
+        chain = list(PROVIDER_FAILOVER_CHAIN)
     elif provider == "ollama":
-        chain = ["ollama"]  # No failover for explicit Ollama
+        chain = ["ollama"]
     else:
-        # Start with the chosen provider, then failover through the rest
         chain = [provider] + [p for p in PROVIDER_FAILOVER_CHAIN if p != provider]
 
+    print(f"DEBUG: Active provider chain: {chain}")
     last_error = None
     for i, prov in enumerate(chain):
-        # Pre-check for API keys to avoid unnecessary noise/validation errors
+        # Pre-check for API keys
         if prov != "ollama":
             key_var = PROVIDER_CONFIG[prov][0]
-            if not os.getenv(key_var):
-                if provider != "auto" and prov == provider:
-                    print(f"  \u274c Error: {key_var} not set for explicitly requested provider {prov.upper()}")
+            api_key = os.getenv(key_var)
+            if not api_key:
+                # print(f"DEBUG: Skipping {prov} (missing {key_var})")
                 continue
+            print(f"DEBUG: Attempting {prov} (key found)")
 
         try:
             return _call_provider(prov, prompt, temperature, stream, num_ctx)
