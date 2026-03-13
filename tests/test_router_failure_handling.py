@@ -6,6 +6,8 @@ from unittest.mock import patch, MagicMock
 # Ensure scripts directory is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import scripts.llm_router as lr
+print(f"DEBUG: sys.path: {sys.path}")
+print(f"DEBUG: lr file: {lr.__file__}")
 import scripts.gpu_platform as gp
 
 class TestFailureHandling(unittest.TestCase):
@@ -13,7 +15,14 @@ class TestFailureHandling(unittest.TestCase):
 
     @patch('scripts.llm_router.requests.Session.post')
     def test_all_providers_fail(self, mock_post):
-        mock_post.return_value = MagicMock(status_code=500, text="Internal Error")
+        import requests
+        def mock_raise():
+            raise requests.exceptions.HTTPError("Mock Error", response=MagicMock(status_code=500))
+        
+        mock_resp = MagicMock(status_code=500, text="Internal Error")
+        mock_resp.raise_for_status.side_effect = mock_raise
+        mock_post.return_value = mock_resp
+        
         # Ensure all providers in the chain are tried and fail
         with patch.dict(os.environ, {
             "GROQ_API_KEY": "k",
@@ -23,7 +32,7 @@ class TestFailureHandling(unittest.TestCase):
             "ANTHROPIC_API_KEY": "k"
         }):
             res = lr.generate("test")
-            self.assertIn("ERROR: LLM generation failed", res)
+            self.assertIn("ALL LLM PROVIDERS EXHAUSTED", res.upper())
 
     @patch('scripts.llm_router.requests.Session.post')
     def test_provider_specific_errors(self, mock_post):

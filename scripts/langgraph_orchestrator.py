@@ -7,7 +7,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 # Import local modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import scripts.llm_router as llm_router
+try:
+    import scripts.llm_router as llm_router
+except ImportError:
+    import llm_router as llm_router
 from scripts.rag_engine import get_rag_context
 from scripts.repo_map import generate_repo_map
 from scripts.visual_qa import run_visual_qa

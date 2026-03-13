@@ -6,7 +6,11 @@ from typing import List
 
 # Import local modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import scripts.llm_router as llm_router
+# Add scripts to path for imports
+try:
+    import scripts.llm_router as llm_router
+except ImportError:
+    import llm_router as llm_router
 
 # Configuration
 MODEL_NAME = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"

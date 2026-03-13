@@ -43,10 +43,10 @@ def execute_in_venv(prompt: str, orchestrator: str):
         # 3. Install orchestrator-specific dependencies
         print(f"INFO: Installing dependencies for {orchestrator} into ephemeral venv...")
         deps = {
-            "crewai": ["crewai", "langchain", "langchain-community", "pydantic-settings", "requests"],
+            "crewai": ["crewai", "langchain", "langchain-community", "langchain-core", "pydantic-settings", "requests"],
             "pydanticai": ["pydantic-ai", "logfire", "requests"],
             "aider": ["aider-chat"],
-            "langgraph": ["langgraph", "langchain", "langchain-openai", "langchain-community", "requests"]
+            "langgraph": ["langgraph", "langchain", "langchain-openai", "langchain-community", "langchain-core", "requests"]
         }
         
         target_deps = deps.get(orchestrator, [])
@@ -76,6 +76,7 @@ def execute_in_venv(prompt: str, orchestrator: str):
             os.makedirs("your_project", exist_ok=True)
             subprocess.run([aider_cmd, "--message", prompt, "--yes"], cwd="your_project", env=env, check=True)
         elif orchestrator_path:
+            # Run without capture to see live output in case of failure
             subprocess.run([python_exe, orchestrator_path, prompt], env=env, check=True)
         else:
             print(f"ERROR: Could not find runner for {orchestrator}")

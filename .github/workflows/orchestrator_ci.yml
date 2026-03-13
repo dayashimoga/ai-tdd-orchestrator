@@ -18,6 +18,10 @@ on:
         description: 'Target Repository Name (will be created if missing)'
         required: true
         default: 'your_project'
+      prompt:
+        description: 'AI Prompt / Task'
+        required: true
+        default: 'Refactor the authentication module.'
       llm_provider:
         description: 'LLM Provider'
         required: true
@@ -84,30 +88,30 @@ jobs:
           cat << 'EOF' > check_gpu.py
           import sys, os
           
-          # Check for Cloud Providers first
+          # Check for Free Cloud Providers first (Skip local Ollama if these are available)
           provider = os.getenv("LLM_PROVIDER", "auto").lower()
-          cloud_configs = [
+          # We only skip local Ollama if we have a FREE cloud provider or Lighthouse
+          free_cloud_configs = [
               ("groq", "GROQ_API_KEY"),
               ("cerebras", "CEREBRAS_API_KEY"),
-              ("openai", "OPENAI_API_KEY"),
-              ("anthropic", "ANTHROPIC_API_KEY"),
               ("gemini", "GOOGLE_API_KEY"),
+              ("lighthouse", "LIGHTHOUSE_API_KEY"),
           ]
-          has_cloud = False
+          has_free_cloud = False
           if provider == "auto":
-              for name, key in cloud_configs:
+              for name, key in free_cloud_configs:
                   if os.getenv(key):
-                      print(f"✅ Found cloud provider ({name}) via auto failover.")
-                      has_cloud = True
+                      print(f"DEBUG: Found free cloud provider ({name}). Skipping local Ollama.")
+                      has_free_cloud = True
                       break
           else:
-              for name, key in cloud_configs:
+              for name, key in free_cloud_configs:
                   if provider == name and os.getenv(key):
-                      print(f"✅ Found explicit cloud provider: {name}")
-                      has_cloud = True
+                      print(f"DEBUG: Found explicit free cloud provider: {name}. Skipping local Ollama.")
+                      has_free_cloud = True
                       break
                       
-          if has_cloud:
+          if has_free_cloud:
               sys.exit(0)
 
           # Fallback to checking remote Ollama GPU
@@ -115,7 +119,7 @@ jobs:
           import scripts.gpu_platform as gpu_platform
           platform, url = gpu_platform.select_platform()
           if platform != "local":
-              print(f"✅ Found active remote GPU: {platform}")
+              print(f"DEBUG: Found active remote GPU: {platform}")
               sys.exit(0)
           sys.exit(1)
           EOF

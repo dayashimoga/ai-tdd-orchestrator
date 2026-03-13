@@ -246,7 +246,7 @@ class TestLLMRouter(unittest.TestCase):
 
         with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "CEREBRAS_API_KEY": "k", "GOOGLE_API_KEY": "k", "OPENAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}):
             result = llm_router.generate("test", stream=False)
-            self.assertEqual(result, "")
+            self.assertIn("ALL LLM PROVIDERS EXHAUSTED", result.upper())
 
     @patch('requests.Session.post')
     def test_generate_streaming_gemini(self, mock_post):
@@ -302,7 +302,7 @@ class TestLLMRouter(unittest.TestCase):
         mock_post.side_effect = requests.exceptions.ConnectionError("offline")
         with patch.dict(os.environ, {"LLM_PROVIDER": "auto", "GROQ_API_KEY": "k", "OPENAI_API_KEY": "k"}):
             result = llm_router.generate("test", stream=False)
-            self.assertEqual(result, "")
+            self.assertIn("ALL LLM PROVIDERS EXHAUSTED", result.upper())
 
     @patch('requests.Session.post')
     def test_generate_generic_exception_failover(self, mock_post):

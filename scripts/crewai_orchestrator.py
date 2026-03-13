@@ -5,8 +5,11 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field
 
 # Import local modules
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import scripts.llm_router as llm_router
+# Import local modules with failover for different execution contexts
+try:
+    import scripts.llm_router as llm_router
+except ImportError:
+    import llm_router as llm_router
 
 # Configuration
 MODEL_NAME = os.getenv("OLLAMA_MODEL") or "qwen2.5-coder:3b"
@@ -18,7 +21,10 @@ try:
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
     from langchain_core.outputs import ChatResult, ChatGeneration
-except ImportError:
+except ImportError as e:
+    print(f"[CRITICAL] Missing essential dependencies (langchain-core): {e}")
+    # In CI/Ephemeral, we expect these to be installed.
+    # Fallback to local mocks only for extreme edge cases, but log loudly.
     class BaseChatModel: 
         def __init__(self, **kwargs): pass
     class BaseMessage: pass
@@ -50,6 +56,7 @@ class RouterChatModel(BaseChatModel):
             prompt += f"{role}: {content}\n"
         prompt += "Assistant: "
         
+        print(f"DEBUG: Routing CrewAI call via custom LLM Router...")
         response_text = llm_router.generate(prompt, stream=False)
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=response_text))])
 
@@ -157,7 +164,7 @@ def run_orchestration(user_prompt: str):
         planning=False, # Explicitly disable planning to avoid OpenAI default
     )
 
-    print(f"DEBUG: Using custom router LLM: {getattr(local_llm, 'model', 'unknown')}")
+    print(f"DEBUG: Using custom router LLM: {llm_router.get_provider_info()}")
     return crew.kickoff()
 
 if __name__ == "__main__":
